@@ -71,7 +71,6 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/icon/logo_transparent.png
     - assets/icon/logo_foreground.png
 
   # Inter (the app's UI face, matching the design prototype) bundled locally
