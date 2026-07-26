@@ -713,8 +713,16 @@ class _StatsBackdrop extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.speed, size: 56, color: cx.accentInk),
-            const SizedBox(height: 18),
+            // Brand mark (same asset as the launcher icon / share card), tinted
+            // to the theme's amber so it reads on either canvas.
+            Image.asset(
+              'assets/icon/logo_foreground.png',
+              width: 72,
+              height: 72,
+              color: cx.accentInk,
+              filterQuality: FilterQuality.medium,
+            ),
+            const SizedBox(height: 10),
             Text(
               'ThrottlePath',
               style: TextStyle(

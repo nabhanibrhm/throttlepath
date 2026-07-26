@@ -70,8 +70,17 @@ class _SplashScreenState extends State<SplashScreen>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.speed, size: 52, color: cx.accentInk),
-            const SizedBox(height: 18),
+            // The brand mark itself (same asset as the launcher icon and the
+            // share card), tinted to the active theme's amber so it stays
+            // legible on the light canvas too.
+            Image.asset(
+              'assets/icon/logo_foreground.png',
+              width: 84,
+              height: 84,
+              color: cx.accentInk,
+              filterQuality: FilterQuality.medium,
+            ),
+            const SizedBox(height: 10),
             AnimatedBuilder(
               animation: _glow,
               builder: (context, _) {

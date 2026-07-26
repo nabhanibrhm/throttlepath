@@ -58,14 +58,16 @@ dev_dependencies:
 
 # Launcher icon generation (Android only — iOS intentionally left untouched).
 #   Regenerate with:  dart run flutter_launcher_icons
-# Adaptive icon = transparent speedometer foreground over the brand near-black.
+# Adaptive icon = the transparent amber path mark over the brand near-black. Both
+# source PNGs are derived from the same artwork, snapped to the brand amber
+# (#FFB22C) so the launcher, the share card and the UI accent all agree.
 flutter_launcher_icons:
   android: true
   ios: false
-  image_path: "assets/icon/app_icon.png"                 # new ThrottlePath logo (full-bleed square)
-  adaptive_icon_foreground: "assets/icon/app_icon.png"   # same logo; its baked dark bg blends into adaptive_icon_background
+  image_path: "assets/icon/app_icon.png"                    # legacy (pre-API 26) icon — mark on a full-bleed #0A0A0A square
+  adaptive_icon_foreground: "assets/icon/logo_foreground.png" # transparent mark; the plate below is adaptive_icon_background
   adaptive_icon_background: "#0A0A0A"
-  adaptive_icon_foreground_inset: 16                     # pad the tight-cropped mark into the adaptive safe zone
+  adaptive_icon_foreground_inset: 16                        # lands the mark inside Android's 66dp safe circle
 
 flutter:
   uses-material-design: true
