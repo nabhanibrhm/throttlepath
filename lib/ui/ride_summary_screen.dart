@@ -23,11 +23,17 @@ class RideSummaryScreen extends ConsumerStatefulWidget {
 
 class _RideSummaryScreenState extends ConsumerState<RideSummaryScreen> {
   final TextEditingController _nameController = TextEditingController();
+
+  /// Name for the *trip* this ride would start — kept separate from the ride's
+  /// own name, since a trip and its first leg are named independently. Only used
+  /// by the "save & continue later" path; ignored by a plain save.
+  final TextEditingController _tripNameController = TextEditingController();
   bool _busy = false;
 
   @override
   void dispose() {
     _nameController.dispose();
+    _tripNameController.dispose();
     super.dispose();
   }
 
@@ -207,28 +213,26 @@ class _RideSummaryScreenState extends ConsumerState<RideSummaryScreen> {
                           ],
                         ),
                         const Spacer(),
-                        TextField(
+                        _NameField(
                           controller: _nameController,
                           enabled: !_busy,
-                          textCapitalization: TextCapitalization.sentences,
-                          style: TextStyle(color: cx.textBright),
-                          decoration: InputDecoration(
-                            hintText: isTripLeg
-                                ? 'Name this leg (e.g. Leg 2 — to Lembang)'
-                                : 'Name this ride (e.g. Morning commute)',
-                            hintStyle: TextStyle(color: cx.textDim),
-                            filled: true,
-                            fillColor: cx.surface,
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(14),
-                              borderSide: BorderSide(color: cx.border),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(14),
-                              borderSide: BorderSide(color: cx.accentInk),
-                            ),
-                          ),
+                          hint: isTripLeg
+                              ? 'Name this leg (e.g. Leg 2 — to Lembang)'
+                              : 'Name this ride (e.g. Morning commute)',
                         ),
+                        // Starting a trip from this ride names the trip too — a
+                        // trip's name is its own, not borrowed from its first
+                        // leg. Hidden while continuing an existing trip (that
+                        // trip is already named, and renameable in trip detail).
+                        if (!isTripLeg) ...[
+                          const SizedBox(height: 10),
+                          _NameField(
+                            controller: _tripNameController,
+                            enabled: !_busy,
+                            hint: 'Trip name — if continuing later',
+                            icon: Icons.alt_route,
+                          ),
+                        ],
                         const SizedBox(height: 16),
                         // Primary action. Standalone ride → SAVE RIDE. A trip leg →
                         // CONTINUE LATER (keep the journey open to add more legs).
@@ -239,7 +243,7 @@ class _RideSummaryScreenState extends ConsumerState<RideSummaryScreen> {
                                 ? null
                                 : () => _run(
                                     isTripLeg
-                                        ? notifier.saveAndContinueTrip
+                                        ? (n) => notifier.saveAndContinueTrip(n)
                                         : notifier.saveFinishedRide,
                                   ),
                             style: ElevatedButton.styleFrom(
@@ -269,8 +273,12 @@ class _RideSummaryScreenState extends ConsumerState<RideSummaryScreen> {
                                 ? null
                                 : () => _run(
                                     isTripLeg
-                                        ? notifier.finishTripWithLeg
-                                        : notifier.saveAndContinueTrip,
+                                        ? (n) => notifier.finishTripWithLeg(n)
+                                        : (n) => notifier.saveAndContinueTrip(
+                                              n,
+                                              tripName:
+                                                  _tripNameController.text,
+                                            ),
                                   ),
                             style: OutlinedButton.styleFrom(
                               foregroundColor: cx.accentInk,
@@ -318,6 +326,54 @@ class _RideSummaryScreenState extends ConsumerState<RideSummaryScreen> {
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// One rounded name input on the summary screen — used for the ride/leg name and
+/// (when this ride could start a trip) the trip name.
+class _NameField extends StatelessWidget {
+  const _NameField({
+    required this.controller,
+    required this.enabled,
+    required this.hint,
+    this.icon,
+  });
+
+  final TextEditingController controller;
+  final bool enabled;
+  final String hint;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final cx = AppColors.of(context);
+    return TextField(
+      controller: controller,
+      enabled: enabled,
+      textCapitalization: TextCapitalization.sentences,
+      style: TextStyle(color: cx.textBright),
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle: TextStyle(color: cx.textDim),
+        prefixIcon: icon == null
+            ? null
+            : Icon(icon, color: cx.textDim, size: 18),
+        filled: true,
+        fillColor: cx.surface,
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: cx.border),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: cx.accentInk),
+        ),
+        disabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: cx.border),
         ),
       ),
     );

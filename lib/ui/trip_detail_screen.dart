@@ -13,6 +13,8 @@ import '../providers/home_providers.dart';
 import '../providers/settings_providers.dart';
 import '../providers/tracking_providers.dart';
 import '../theme/app_theme.dart';
+import 'place_route_label.dart';
+import 'rename_dialog.dart';
 import 'ride_detail_screen.dart';
 import 'share_flow.dart';
 import 'tracking_map_screen.dart' show basemapUrl;
@@ -48,6 +50,10 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
   // Local mirror of the trip's open/closed state so the actions update in place
   // after Finish/Reopen without leaving the screen.
   late DateTime? _finishedAt = widget.trip.finishedAt;
+
+  /// Local mirror of the trip's name, so a rename shows in the app bar (and in
+  /// the share card) without popping back to History.
+  late String? _name = widget.trip.name;
   bool _busy = false;
   bool _sharing = false;
 
@@ -63,7 +69,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
 
     final stats = TripStats.fromLegs([for (final lt in legTracks) lt.leg]);
     final combined =
-        stats.toCombinedRide(tripId: widget.trip.id, name: widget.trip.name);
+        stats.toCombinedRide(tripId: widget.trip.id, name: _name);
     final points = [for (final lt in legTracks) ...lt.track];
     final legStarts = <int>[];
     var acc = 0;
@@ -118,12 +124,49 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
     }
   }
 
+  /// Renames the trip. A trip's name is independent of its legs' names, so this
+  /// leaves every leg untouched.
+  Future<void> _renameTrip() async {
+    final next = await showRenameDialog(
+      context,
+      title: 'Rename trip',
+      initial: _name,
+      hint: 'Trip name (e.g. Ride to Puncak)',
+    );
+    if (next == null || !mounted) return;
+    setState(() => _busy = true);
+    await DatabaseService.instance.setTripName(widget.trip.id, next);
+    widget.trip.name = next; // keep the pushed-in object consistent
+    _invalidateHistory();
+    if (mounted) {
+      setState(() {
+        _name = next;
+        _busy = false;
+      });
+    }
+  }
+
+  /// Renames one leg (a [Ride]) — never the trip.
+  Future<void> _renameLeg(Ride leg, int index) async {
+    final next = await showRenameDialog(
+      context,
+      title: 'Rename leg ${index + 1}',
+      initial: leg.name,
+      hint: 'Leg name (e.g. Berangkat)',
+    );
+    if (next == null || !mounted) return;
+    setState(() => _busy = true);
+    await DatabaseService.instance.setRideName(leg.id, next);
+    _invalidateHistory();
+    if (mounted) setState(() => _busy = false);
+  }
+
   /// Resumes the trip: arms the next-leg continuation and drops the rider back
   /// on the Record tab.
   void _continue() {
     ref
         .read(trackingControllerProvider.notifier)
-        .beginContinuation(widget.trip.id, widget.trip.name);
+        .beginContinuation(widget.trip.id, _name);
     ref.read(homeTabProvider.notifier).state = 0; // Record tab
     Navigator.of(context).popUntil((r) => r.isFirst);
   }
@@ -133,7 +176,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
     final cx = AppColors.of(context);
     final unit = ref.watch(speedUnitProvider);
     final legsAsync = ref.watch(tripLegsProvider(widget.trip.id));
-    final name = widget.trip.name?.trim();
+    final name = _name?.trim();
     final canShare = legsAsync.valueOrNull?.isNotEmpty == true;
 
     return Scaffold(
@@ -172,6 +215,8 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
               icon: Icon(Icons.more_vert, color: cx.textBright),
               onSelected: (v) {
                 switch (v) {
+                  case 'rename':
+                    _renameTrip();
                   case 'continue':
                     _continue();
                   case 'finish':
@@ -181,6 +226,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
                 }
               },
               itemBuilder: (_) => [
+                _menuItem('rename', Icons.edit_outlined, 'Rename trip', cx),
                 if (_isOpen) ...[
                   _menuItem('continue', Icons.play_arrow, 'Continue trip', cx),
                   _menuItem('finish', Icons.flag, 'Finish trip', cx),
@@ -222,6 +268,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
                             builder: (_) => RideDetailScreen(ride: leg),
                           ),
                         ),
+                        onRenameLeg: _renameLeg,
                       ),
                       const SizedBox(height: 20),
                     ],
@@ -502,11 +549,13 @@ class _LegList extends StatelessWidget {
     required this.legTracks,
     required this.unit,
     required this.onOpenLeg,
+    required this.onRenameLeg,
   });
 
   final List<LegTrack> legTracks;
   final SpeedUnit unit;
   final ValueChanged<Ride> onOpenLeg;
+  final void Function(Ride leg, int index) onRenameLeg;
 
   @override
   Widget build(BuildContext context) {
@@ -520,6 +569,7 @@ class _LegList extends StatelessWidget {
               leg: legTracks[i].leg,
               unit: unit,
               onTap: () => onOpenLeg(legTracks[i].leg),
+              onRename: () => onRenameLeg(legTracks[i].leg, i),
             ),
             if (i < legTracks.length - 1) const SizedBox(height: 10),
           ],
@@ -535,12 +585,14 @@ class _LegRow extends StatelessWidget {
     required this.leg,
     required this.unit,
     required this.onTap,
+    required this.onRename,
   });
 
   final int index;
   final Ride leg;
   final SpeedUnit unit;
   final VoidCallback onTap;
+  final VoidCallback onRename;
 
   @override
   Widget build(BuildContext context) {
@@ -551,6 +603,9 @@ class _LegRow extends StatelessWidget {
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
         onTap: onTap,
+        // Long-press renames this leg in place — the same action lives in the
+        // leg's own detail screen for discoverability.
+        onLongPress: onRename,
         borderRadius: BorderRadius.circular(14),
         child: Container(
           padding: const EdgeInsets.all(14),
@@ -600,6 +655,20 @@ class _LegRow extends StatelessWidget {
                       '${unit.speedLabel} avg',
                       style: TextStyle(color: cx.textDim, fontSize: 12),
                     ),
+                    // Where this leg actually went. Collapses to nothing when
+                    // neither end geocoded (offline saves, old rides).
+                    if (PlaceRouteLabel.label(
+                          leg.startPlace,
+                          leg.endPlace,
+                        ) !=
+                        null) ...[
+                      const SizedBox(height: 4),
+                      PlaceRouteLabel(
+                        startPlace: leg.startPlace,
+                        endPlace: leg.endPlace,
+                        fontSize: 11,
+                      ),
+                    ],
                   ],
                 ),
               ),

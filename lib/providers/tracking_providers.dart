@@ -204,19 +204,23 @@ class TrackingController extends StateNotifier<TrackingUiState> {
     _resetToIdle(clearContinuation: true);
   }
 
-  /// Saves the finished leg into its trip — creating a fresh open trip (named
-  /// after this leg) if this is a first leg, or linking to the trip currently
-  /// being continued — and leaves the trip OPEN so the rider can continue it.
-  Future<void> saveAndContinueTrip(String name) async {
-    final tripId = await _resolveTripId(name);
+  /// Saves the finished leg into its trip — creating a fresh open trip named
+  /// [tripName] if this is a first leg, or linking to the trip currently being
+  /// continued — and leaves the trip OPEN so the rider can continue it.
+  ///
+  /// [name] names the leg and [tripName] the trip: the two are independent, so
+  /// naming a leg never renames its trip (or vice versa).
+  Future<void> saveAndContinueTrip(String name, {String? tripName}) async {
+    final tripId = await _resolveTripId(tripName);
     await _persistLeg(name, tripId: tripId);
     _resetToIdle(clearContinuation: true);
   }
 
-  /// Saves the finished leg into its trip (creating one if needed) and then
-  /// FINISHES that trip — it accepts no more legs until reopened.
-  Future<void> finishTripWithLeg(String name) async {
-    final tripId = await _resolveTripId(name);
+  /// Saves the finished leg into its trip (creating one named [tripName] if
+  /// needed) and then FINISHES that trip — it accepts no more legs until
+  /// reopened.
+  Future<void> finishTripWithLeg(String name, {String? tripName}) async {
+    final tripId = await _resolveTripId(tripName);
     await _persistLeg(name, tripId: tripId);
     await DatabaseService.instance.finishTrip(tripId);
     _resetToIdle(clearContinuation: true);
@@ -254,14 +258,18 @@ class TrackingController extends StateNotifier<TrackingUiState> {
   }
 
   /// Resolves the trip this leg belongs to: the trip currently being continued,
-  /// or a freshly-created open trip (named after this first leg).
-  Future<int> _resolveTripId(String legName) async {
+  /// or a freshly-created open trip named [tripName]. A trip's name is asked for
+  /// separately from its legs' — when the rider leaves it blank the trip falls
+  /// back to a dated placeholder (never the leg's name), and stays renameable
+  /// from trip detail.
+  Future<int> _resolveTripId(String? tripName) async {
     final existing = state.continuingTripId;
     if (existing != null) return existing;
-    final trimmed = legName.trim();
+    final now = DateTime.now();
+    final trimmed = tripName?.trim() ?? '';
     final trip = Trip()
-      ..createdAt = DateTime.now()
-      ..name = trimmed.isEmpty ? null : trimmed;
+      ..createdAt = now
+      ..name = trimmed.isEmpty ? _defaultTripName(now) : trimmed;
     return DatabaseService.instance.createTrip(trip);
   }
 
@@ -330,6 +338,17 @@ class TrackingController extends StateNotifier<TrackingUiState> {
     _cancelledSub.cancel();
     super.dispose();
   }
+}
+
+/// Dated placeholder for an unnamed trip, e.g. `Trip · Jul 26`. Keeps a
+/// History list of unnamed trips distinguishable until the rider renames them.
+String _defaultTripName(DateTime when) {
+  const months = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', //
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  ];
+  final local = when.toLocal();
+  return 'Trip · ${months[local.month - 1]} ${local.day}';
 }
 
 final trackingControllerProvider =

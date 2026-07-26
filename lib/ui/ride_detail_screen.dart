@@ -8,6 +8,7 @@ import 'package:latlong2/latlong.dart';
 import '../core/geo.dart';
 import '../core/speed_palette.dart';
 import '../core/units.dart';
+import '../data/database_service.dart';
 import '../data/models/ride.dart';
 import '../data/models/track_point.dart';
 import '../providers/history_providers.dart';
@@ -16,6 +17,7 @@ import '../theme/app_theme.dart';
 import 'accel_brake_chart.dart';
 import 'elevation_speed_chart.dart';
 import 'place_route_label.dart';
+import 'rename_dialog.dart';
 import 'share_flow.dart';
 import 'speed_distance_chart.dart';
 import 'speed_zone_chart.dart';
@@ -36,6 +38,37 @@ class RideDetailScreen extends ConsumerStatefulWidget {
 
 class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
   bool _sharing = false;
+
+  /// Local mirror of the ride's name so a rename lands in the app bar without
+  /// leaving the screen.
+  late String? _name = widget.ride.name;
+
+  /// True when this ride is a leg of a trip — only the wording changes.
+  bool get _isLeg => widget.ride.tripId != null;
+
+  /// Renames this ride (or leg). Renaming a leg never touches its trip's name —
+  /// the two are independent.
+  Future<void> _rename() async {
+    final next = await showRenameDialog(
+      context,
+      title: _isLeg ? 'Rename leg' : 'Rename ride',
+      initial: _name,
+      hint: _isLeg
+          ? 'Leg name (e.g. Berangkat)'
+          : 'Ride name (e.g. Morning commute)',
+    );
+    if (next == null) return;
+    await DatabaseService.instance.setRideName(widget.ride.id, next);
+    widget.ride.name = next; // keep the pushed-in object consistent
+    ref.invalidate(rideHistoryProvider);
+    final tripId = widget.ride.tripId;
+    if (tripId != null) {
+      ref.invalidate(tripLegsProvider(tripId));
+      ref.invalidate(openTripsProvider);
+      ref.invalidate(finishedTripsProvider);
+    }
+    if (mounted) setState(() => _name = next);
+  }
 
   /// Opens the shared "pick a layout → share/save" flow for this ride. Guarded
   /// so it only fires once the track has loaded (the button is disabled until
@@ -59,9 +92,9 @@ class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
   Widget build(BuildContext context) {
     final cx = AppColors.of(context);
     final trackAsync = ref.watch(rideTrackProvider(widget.ride.id));
-    final title = widget.ride.name?.trim().isNotEmpty == true
-        ? widget.ride.name!.trim()
-        : 'Untitled ride';
+    final title = _name?.trim().isNotEmpty == true
+        ? _name!.trim()
+        : (_isLeg ? 'Untitled leg' : 'Untitled ride');
 
     return Scaffold(
       backgroundColor: cx.canvas,
@@ -86,12 +119,18 @@ class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
                 ),
               ),
             )
-          else
+          else ...[
+            IconButton(
+              icon: const Icon(Icons.edit_outlined),
+              tooltip: _isLeg ? 'Rename leg' : 'Rename ride',
+              onPressed: _rename,
+            ),
             IconButton(
               icon: const Icon(Icons.share),
               tooltip: 'Share ride',
               onPressed: trackAsync.hasValue ? _share : null,
             ),
+          ],
         ],
       ),
       body: Column(

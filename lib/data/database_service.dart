@@ -120,6 +120,17 @@ class DatabaseService {
 
   Future<Trip?> getTripById(int id) => isar.trips.get(id);
 
+  /// Renames a trip. A trip's name is its own — independent of its legs' names —
+  /// so this never touches the legs. No-op if the trip was deleted.
+  Future<void> setTripName(int tripId, String name) {
+    return isar.writeTxn(() async {
+      final trip = await isar.trips.get(tripId);
+      if (trip == null) return;
+      trip.name = name;
+      await isar.trips.put(trip);
+    });
+  }
+
   /// All trips, newest first.
   Future<List<Trip>> getAllTrips() {
     return isar.trips.where().sortByCreatedAtDesc().findAll();
