@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 
 import '../core/speed_palette.dart';
@@ -52,12 +53,19 @@ class ShareCard extends StatelessWidget {
     required this.points,
     required this.unit,
     this.layout = ShareLayout.split,
+    this.legStarts = const [],
   });
 
   final Ride ride;
   final List<TrackPoint> points;
   final SpeedUnit unit;
   final ShareLayout layout;
+
+  /// Indices into [points] where each leg (after the first) begins — set when
+  /// this card renders a whole multi-leg trip so the route draws each leg as a
+  /// separate colored polyline instead of one line with false join connectors.
+  /// Empty for a single ride.
+  final List<int> legStarts;
 
   /// Bundled brand mark — clean amber speedometer on transparent. Precached
   /// before capture (the render only waits a couple of frames).
@@ -286,6 +294,7 @@ class ShareCard extends StatelessWidget {
           points,
           colorBySpeed: colorBySpeed,
           maxSpeedKmh: ride.maxSpeedKmh,
+          legStarts: legStarts,
         ),
       ),
     );
@@ -433,14 +442,30 @@ class _RoutePainter extends CustomPainter {
     this.points, {
     this.colorBySpeed = false,
     this.maxSpeedKmh = 0,
+    this.legStarts = const [],
   });
 
   final List<TrackPoint> points;
   final bool colorBySpeed;
   final double maxSpeedKmh;
 
+  /// Indices where each leg (after the first) begins; empty for a single ride.
+  final List<int> legStarts;
+
   static const _amber = Color(0xFFFFB22C);
   static const _red = Color(0xFFEF4444);
+  static const _dim = Color(0xFFD8D8D8);
+
+  /// Per-leg route hues, cycled by leg index. Leg 1 is the brand amber so a
+  /// single-leg trip (and every plain ride) keeps the original look.
+  static const _legPalette = <Color>[
+    Color(0xFFFFB22C), // amber (brand)
+    Color(0xFF29B6F6), // light blue
+    Color(0xFF66BB6A), // green
+    Color(0xFFAB47BC), // purple
+    Color(0xFFFF7043), // deep orange
+    Color(0xFFEC407A), // pink
+  ];
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -494,60 +519,88 @@ class _RoutePainter extends CustomPainter {
 
     final mapped = [for (final o in proj) map(o)];
 
+    // One contiguous range per leg (single ride → one range). Segments never
+    // bridge a leg boundary, so joins draw no false straight connector.
+    final ranges = _legRanges(points.length);
+
     if (colorBySpeed) {
-      _paintSpeedColored(canvas, mapped);
+      _paintSpeedColored(canvas, mapped, ranges);
     } else {
-      _paintAmber(canvas, mapped);
+      _paintLegs(canvas, mapped, ranges);
     }
 
-    // Start (amber) and end (red) dots.
+    // Turnaround dots at each join (end of every non-final leg), then the start
+    // (amber) and end (red) dots painted on top.
+    for (var r = 0; r < ranges.length - 1; r++) {
+      final end = ranges[r].$2 - 1;
+      if (end >= 0 && end < mapped.length) _dot(canvas, mapped[end], _dim);
+    }
     _dot(canvas, mapped.first, _amber);
     _dot(canvas, mapped.last, _red);
   }
 
-  void _paintAmber(Canvas canvas, List<Offset> pts) {
-    final path = Path()..moveTo(pts.first.dx, pts.first.dy);
-    for (final o in pts.skip(1)) {
-      path.lineTo(o.dx, o.dy);
+  /// Contiguous `[start, end)` index ranges, one per leg, from [legStarts]. With
+  /// no boundaries the whole track is a single range.
+  List<(int, int)> _legRanges(int n) {
+    final bounds = <int>[
+      0,
+      for (final b in legStarts)
+        if (b > 0 && b < n) b,
+      n,
+    ]..sort();
+    final out = <(int, int)>[];
+    for (var i = 0; i < bounds.length - 1; i++) {
+      if (bounds[i + 1] > bounds[i]) out.add((bounds[i], bounds[i + 1]));
     }
-    // Soft glow under the line.
-    canvas.drawPath(
-      path,
-      Paint()
-        ..color = _amber.withValues(alpha: 0.25)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 8
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
-    );
-    canvas.drawPath(
-      path,
-      Paint()
-        ..color = _amber
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 3.5
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round,
-    );
+    return out.isEmpty ? [(0, n)] : out;
   }
 
-  void _paintSpeedColored(Canvas canvas, List<Offset> pts) {
+  void _paintLegs(Canvas canvas, List<Offset> pts, List<(int, int)> ranges) {
+    for (var r = 0; r < ranges.length; r++) {
+      final (start, end) = ranges[r];
+      if (end - start < 2) continue;
+      final color = _legPalette[r % _legPalette.length];
+      final path = Path()..moveTo(pts[start].dx, pts[start].dy);
+      for (var i = start + 1; i < end; i++) {
+        path.lineTo(pts[i].dx, pts[i].dy);
+      }
+      // Soft glow under the line.
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = color.withValues(alpha: 0.25)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 8
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
+      );
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = color
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 3.5
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round,
+      );
+    }
+  }
+
+  void _paintSpeedColored(
+      Canvas canvas, List<Offset> pts, List<(int, int)> ranges) {
     final maxS = maxSpeedKmh <= 0 ? 1.0 : maxSpeedKmh;
     final base = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 4
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round;
-    for (var i = 1; i < pts.length; i++) {
-      final meanKmh =
-          (points[i - 1].speedMps + points[i].speedMps) / 2 * 3.6;
-      final t = (meanKmh / maxS).clamp(0.0, 1.0);
-      canvas.drawLine(
-        pts[i - 1],
-        pts[i],
-        base..color = SpeedPalette.at(t),
-      );
+    for (final (start, end) in ranges) {
+      for (var i = start + 1; i < end; i++) {
+        final meanKmh = (points[i - 1].speedMps + points[i].speedMps) / 2 * 3.6;
+        final t = (meanKmh / maxS).clamp(0.0, 1.0);
+        canvas.drawLine(pts[i - 1], pts[i], base..color = SpeedPalette.at(t));
+      }
     }
   }
 
@@ -566,7 +619,8 @@ class _RoutePainter extends CustomPainter {
   bool shouldRepaint(covariant _RoutePainter oldDelegate) =>
       oldDelegate.points != points ||
       oldDelegate.colorBySpeed != colorBySpeed ||
-      oldDelegate.maxSpeedKmh != maxSpeedKmh;
+      oldDelegate.maxSpeedKmh != maxSpeedKmh ||
+      !listEquals(oldDelegate.legStarts, legStarts);
 }
 
 String _fmtDuration(int seconds) {

@@ -44,6 +44,7 @@ class RideShare {
     List<TrackPoint> points,
     SpeedUnit unit,
     ShareLayout layout,
+    List<int> legStarts,
   ) async {
     // The off-screen capture only waits a couple of frames, so make sure the
     // brand logo is decoded into the image cache first (otherwise it can render
@@ -54,8 +55,13 @@ class RideShare {
     }
     return captureWidgetToPng(
       context,
-      child:
-          ShareCard(ride: ride, points: points, unit: unit, layout: layout),
+      child: ShareCard(
+        ride: ride,
+        points: points,
+        unit: unit,
+        layout: layout,
+        legStarts: legStarts,
+      ),
       logicalSize: _canvas,
       pixelRatio: _pixelRatio,
     );
@@ -85,8 +91,10 @@ class RideShare {
     required List<TrackPoint> points,
     required SpeedUnit unit,
     required ShareLayout layout,
+    List<int> legStarts = const [],
   }) async {
-    final pngBytes = await _renderPng(context, ride, points, unit, layout);
+    final pngBytes =
+        await _renderPng(context, ride, points, unit, layout, legStarts);
     final file = await _writeToCache(ride, pngBytes);
 
     // Hand off to the Android host, which builds the content:// URI via
@@ -116,8 +124,10 @@ class RideShare {
     required List<TrackPoint> points,
     required SpeedUnit unit,
     required ShareLayout layout,
+    List<int> legStarts = const [],
   }) async {
-    final pngBytes = await _renderPng(context, ride, points, unit, layout);
+    final pngBytes =
+        await _renderPng(context, ride, points, unit, layout, legStarts);
     final file = await _writeToCache(ride, pngBytes);
 
     try {

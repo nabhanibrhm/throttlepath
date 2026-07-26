@@ -12,63 +12,14 @@ import '../data/models/ride.dart';
 import '../data/models/track_point.dart';
 import '../providers/history_providers.dart';
 import '../providers/settings_providers.dart';
-import '../services/ride_share.dart';
 import '../theme/app_theme.dart';
 import 'accel_brake_chart.dart';
 import 'elevation_speed_chart.dart';
 import 'place_route_label.dart';
-import 'share_card.dart';
+import 'share_flow.dart';
 import 'speed_distance_chart.dart';
 import 'speed_zone_chart.dart';
 import 'tracking_map_screen.dart' show basemapUrl;
-
-/// The two ways a rendered ride card can be sent off.
-enum _ShareAction { instagram, download }
-
-/// A row in the share sheet: an amber icon in a rounded square + a label.
-class _ShareOption extends StatelessWidget {
-  const _ShareOption({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final cx = AppColors.of(context);
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
-        child: Row(
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: cx.canvas,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(icon, color: cx.accentInk, size: 18),
-            ),
-            const SizedBox(width: 14),
-            Text(label,
-                style: TextStyle(
-                    color: cx.textBright,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600)),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 /// Detail view for a saved ride: the recorded track replayed as a polyline on
 /// the map, with the full summary stats below.
@@ -86,166 +37,22 @@ class RideDetailScreen extends ConsumerStatefulWidget {
 class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
   bool _sharing = false;
 
-  /// Lets the rider pick Instagram or a plain PNG download, renders the ride
-  /// card, and dispatches it accordingly. Guarded so it only fires once the
-  /// track has loaded and never re-enters while a render/share is in flight.
+  /// Opens the shared "pick a layout → share/save" flow for this ride. Guarded
+  /// so it only fires once the track has loaded (the button is disabled until
+  /// then) and never re-enters while a render/share is in flight.
   Future<void> _share() async {
     if (_sharing) return;
     final points = ref.read(rideTrackProvider(widget.ride.id)).valueOrNull;
     if (points == null) return; // track still loading — button is disabled
-    final unit = ref.read(speedUnitProvider);
-
-    // Step 1 — pick one of the four card layouts (live previews).
-    final layout = await _pickLayout(points, unit);
-    if (layout == null || !mounted) return;
-
-    // Step 2 — pick the export action for the chosen layout.
-    final action = await _showShareOptions();
-    if (action == null || !mounted) return;
-
-    setState(() => _sharing = true);
-    try {
-      if (action == _ShareAction.instagram) {
-        await RideShare.shareToInstagram(
-          context: context,
-          ride: widget.ride,
-          points: points,
-          unit: unit,
-          layout: layout,
-        );
-      } else {
-        await RideShare.saveToGallery(
-          context: context,
-          ride: widget.ride,
-          points: points,
-          unit: unit,
-          layout: layout,
-        );
-        if (mounted) _showMessage('Saved to your gallery.');
-      }
-    } catch (_) {
-      if (!mounted) return;
-      _showMessage(
-        action == _ShareAction.instagram
-            ? "Couldn't share this ride. Try again."
-            : "Couldn't save the image. Try again.",
-        isError: true,
-      );
-    } finally {
-      if (mounted) setState(() => _sharing = false);
-    }
-  }
-
-  /// Bottom sheet of the four card layouts, each rendered as a live preview on
-  /// a dark backdrop (the cards are transparent + styled for a dark look).
-  /// Returns the picked [ShareLayout], or null if dismissed.
-  Future<ShareLayout?> _pickLayout(List<TrackPoint> points, SpeedUnit unit) {
-    final cx = AppColors.of(context);
-    return showModalBottomSheet<ShareLayout>(
-      context: context,
-      backgroundColor: cx.surface,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Choose a layout',
-                  style: TextStyle(
-                      color: cx.textBright,
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700)),
-              const SizedBox(height: 4),
-              Text('Pick a card style, then share or save it.',
-                  style: TextStyle(color: cx.textDim, fontSize: 13)),
-              const SizedBox(height: 16),
-              Flexible(
-                child: GridView.count(
-                  shrinkWrap: true,
-                  crossAxisCount: 2,
-                  mainAxisSpacing: 16,
-                  crossAxisSpacing: 16,
-                  childAspectRatio: 0.52,
-                  children: [
-                    for (final layout in ShareLayout.values)
-                      _LayoutTile(
-                        ride: widget.ride,
-                        points: points,
-                        unit: unit,
-                        layout: layout,
-                        onTap: () => Navigator.of(ctx).pop(layout),
-                      ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    await showShareFlow(
+      context,
+      ride: widget.ride,
+      points: points,
+      unit: ref.read(speedUnitProvider),
+      onBusyChanged: (b) {
+        if (mounted) setState(() => _sharing = b);
+      },
     );
-  }
-
-  Future<_ShareAction?> _showShareOptions() {
-    final cx = AppColors.of(context);
-    return showDialog<_ShareAction>(
-      context: context,
-      builder: (ctx) => Dialog(
-        backgroundColor: cx.surface,
-        insetPadding: const EdgeInsets.symmetric(horizontal: 40),
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        child: Padding(
-          padding: const EdgeInsets.all(22),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text('Share ride',
-                  style: TextStyle(
-                      color: cx.textBright,
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700)),
-              const SizedBox(height: 14),
-              _ShareOption(
-                icon: Icons.camera_alt,
-                label: 'Share to Instagram',
-                onTap: () => Navigator.of(ctx).pop(_ShareAction.instagram),
-              ),
-              _ShareOption(
-                icon: Icons.download,
-                label: 'Download as PNG',
-                onTap: () => Navigator.of(ctx).pop(_ShareAction.download),
-              ),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: () => Navigator.of(ctx).pop(),
-                  child: Text('Cancel', style: TextStyle(color: cx.textDim)),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _showMessage(String message, {bool isError = false}) {
-    final cx = AppColors.of(context);
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          backgroundColor: cx.surface,
-          content: Text(message,
-              style: TextStyle(color: isError ? cx.dangerInk : cx.textBright)),
-        ),
-      );
   }
 
   @override
@@ -922,73 +729,6 @@ class _Stat extends StatelessWidget {
               ],
             ],
           ),
-        ],
-      ),
-    );
-  }
-}
-
-/// One tappable card-layout preview in the "Choose a layout" sheet: the real
-/// [ShareCard] scaled to fit, on a fixed dark backdrop (the card is transparent
-/// and styled for a dark look), with the layout's name + blurb beneath.
-class _LayoutTile extends StatelessWidget {
-  const _LayoutTile({
-    required this.ride,
-    required this.points,
-    required this.unit,
-    required this.layout,
-    required this.onTap,
-  });
-
-  final Ride ride;
-  final List<TrackPoint> points;
-  final SpeedUnit unit;
-  final ShareLayout layout;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final cx = AppColors.of(context);
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Container(
-              width: double.infinity,
-              decoration: BoxDecoration(
-                color: const Color(0xFF0A0A0A),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: cx.border),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: FittedBox(
-                fit: BoxFit.contain,
-                child: SizedBox(
-                  width: 360,
-                  height: 640,
-                  child: ShareCard(
-                    ride: ride,
-                    points: points,
-                    unit: unit,
-                    layout: layout,
-                  ),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(layout.title,
-              style: TextStyle(
-                  color: cx.textBright,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700)),
-          Text(layout.blurb,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: cx.textDim, fontSize: 11)),
         ],
       ),
     );
