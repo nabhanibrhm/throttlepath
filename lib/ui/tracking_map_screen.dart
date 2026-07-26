@@ -10,6 +10,8 @@ import 'package:latlong2/latlong.dart';
 
 import '../core/record_view.dart';
 import '../core/units.dart';
+import '../providers/history_providers.dart';
+import '../providers/home_providers.dart';
 import '../providers/settings_providers.dart';
 import '../providers/tracking_providers.dart';
 import '../services/permission_service.dart';
@@ -103,6 +105,9 @@ class _TrackingMapScreenState extends ConsumerState<TrackingMapScreen> {
     final state = ref.watch(trackingControllerProvider);
     final view = ref.watch(recordViewProvider);
     final unit = ref.watch(speedUnitProvider);
+    // Best-effort "you're near where a trip ended — continue it?" nudge.
+    final nearby = ref.watch(nearbyOpenTripProvider).valueOrNull;
+    final dismissedNudges = ref.watch(dismissedTripNudgesProvider);
 
     // Follow the rider (only while the map is actually on screen), present the
     // post-ride summary, and surface errors.
@@ -197,6 +202,29 @@ class _TrackingMapScreenState extends ConsumerState<TrackingMapScreen> {
               child: _StatsBackdrop(state: state, onShowMap: _cycleView),
             ),
           if (view == RecordView.map) const _MapAttribution(),
+          // Pending trip continuation: a top banner naming the trip this next
+          // recording will join, with a cancel to detach and ride standalone.
+          if (state.continuingTripId != null)
+            _ContinuingTripBanner(
+              tripName: state.continuingTripName,
+              onCancel: () => ref
+                  .read(trackingControllerProvider.notifier)
+                  .cancelContinuation(),
+            )
+          // Otherwise, when idle near an open trip's end, nudge to continue it.
+          else if (nearby != null &&
+              !state.isTracking &&
+              state.phase == 'idle' &&
+              !dismissedNudges.contains(nearby.trip.id))
+            _NearbyTripBanner(
+              tripName: nearby.trip.name,
+              onContinue: () => ref
+                  .read(trackingControllerProvider.notifier)
+                  .beginContinuation(nearby.trip.id, nearby.trip.name),
+              onDismiss: () => ref
+                  .read(dismissedTripNudgesProvider.notifier)
+                  .update((s) => {...s, nearby.trip.id}),
+            ),
           Align(
             alignment: Alignment.bottomCenter,
             child: Column(
@@ -287,6 +315,198 @@ class _MapAttribution extends StatelessWidget {
           child: Text(
             '© OpenStreetMap · CARTO',
             style: TextStyle(color: cx.textDim, fontSize: 9),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Top banner shown while a trip continuation is pending — names the trip the
+/// next recording will join and offers a cancel (ride standalone instead).
+class _ContinuingTripBanner extends StatelessWidget {
+  const _ContinuingTripBanner({required this.tripName, required this.onCancel});
+
+  final String? tripName;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final cx = AppColors.of(context);
+    final name = tripName?.trim();
+    return Positioned(
+      top: 0,
+      left: 0,
+      right: 0,
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: cx.surface.withValues(alpha: 0.82),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: cx.accentInk.withValues(alpha: 0.5)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.alt_route, color: cx.accentInk, size: 18),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'CONTINUING TRIP',
+                            style: TextStyle(
+                              color: cx.accentInk,
+                              fontSize: 10,
+                              letterSpacing: 1.5,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 1),
+                          Text(
+                            name?.isNotEmpty == true ? name! : 'Untitled trip',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: cx.textBright,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: onCancel,
+                      style: TextButton.styleFrom(
+                        foregroundColor: cx.textDim,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        minimumSize: const Size(0, 36),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Text('Cancel',
+                          style: TextStyle(
+                              fontSize: 13, fontWeight: FontWeight.w600)),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Top banner nudging the rider to continue a nearby open trip: shown while
+/// idle when the current position is close to where an open trip last ended.
+class _NearbyTripBanner extends StatelessWidget {
+  const _NearbyTripBanner({
+    required this.tripName,
+    required this.onContinue,
+    required this.onDismiss,
+  });
+
+  final String? tripName;
+  final VoidCallback onContinue;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    final cx = AppColors.of(context);
+    final name = tripName?.trim();
+    return Positioned(
+      top: 0,
+      left: 0,
+      right: 0,
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+                decoration: BoxDecoration(
+                  color: cx.surface.withValues(alpha: 0.82),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: cx.accentInk.withValues(alpha: 0.5)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.near_me, color: cx.accentInk, size: 18),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'NEAR A TRIP’S END',
+                            style: TextStyle(
+                              color: cx.accentInk,
+                              fontSize: 10,
+                              letterSpacing: 1.5,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 1),
+                          Text(
+                            'Continue ${name?.isNotEmpty == true ? '“$name”' : 'your trip'}?',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: cx.textBright,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: onDismiss,
+                      style: TextButton.styleFrom(
+                        foregroundColor: cx.textDim,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        minimumSize: const Size(0, 36),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Text('Not now',
+                          style: TextStyle(
+                              fontSize: 13, fontWeight: FontWeight.w600)),
+                    ),
+                    const SizedBox(width: 2),
+                    ElevatedButton(
+                      onPressed: onContinue,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: cx.accent,
+                        foregroundColor: cx.onAccent,
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        minimumSize: const Size(0, 38),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                      child: const Text('Continue',
+                          style: TextStyle(
+                              fontSize: 13, fontWeight: FontWeight.w800)),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ),
         ),
       ),
