@@ -48,4 +48,8 @@ CLAUDE.md
 
 #DB store
 /tool/pulled_db/*
-/graphify-out/*
+
+# Claude Code / graphify — local tooling, not part of the app
+/graphify-out/
+/.claudignore
+/.claude/
