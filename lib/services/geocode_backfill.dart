@@ -65,4 +65,51 @@ class GeocodeBackfill {
       _running = false;
     }
   }
+
+  /// One-time, user-initiated re-geocode of EVERY ride's start/end place names
+  /// to the current label format — e.g. upgrading old "subdistrict"-only labels
+  /// to "subdistrict, city". Unlike [run], this re-attempts rides that already
+  /// have names (trip legs included, since [DatabaseService.getAllRides] spans
+  /// them).
+  ///
+  /// Best-effort and online-only: a ride whose lookup fails keeps its existing
+  /// name (never wiped on a transient error), and a ride that resolves to the
+  /// same value is left untouched. Calls [onProgress] after each ride and
+  /// returns the number of rides actually changed.
+  Future<int> relabelAll({void Function(int done, int total)? onProgress}) async {
+    if (_running) return 0;
+    _running = true;
+    try {
+      final db = DatabaseService.instance;
+      final rides = await db.getAllRides();
+      var updated = 0;
+      for (var i = 0; i < rides.length; i++) {
+        final ride = rides[i];
+
+        final startPt = await db.getFirstTrackPoint(ride.id);
+        final endPt = await db.getLastTrackPoint(ride.id);
+
+        // Re-geocode where we have a fix; on failure fall back to the old value.
+        final startPlace = startPt == null
+            ? ride.startPlace
+            : await GeocodingService.placeName(
+                    startPt.latitude, startPt.longitude) ??
+                ride.startPlace;
+        final endPlace = endPt == null
+            ? ride.endPlace
+            : await GeocodingService.placeName(endPt.latitude, endPt.longitude) ??
+                ride.endPlace;
+
+        if (startPlace != ride.startPlace || endPlace != ride.endPlace) {
+          await db.setRidePlaces(ride.id,
+              startPlace: startPlace, endPlace: endPlace);
+          updated++;
+        }
+        onProgress?.call(i + 1, rides.length);
+      }
+      return updated;
+    } finally {
+      _running = false;
+    }
+  }
 }

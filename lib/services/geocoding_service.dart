@@ -23,9 +23,9 @@ class GeocodingService {
   static const Duration _retryBackoff = Duration(milliseconds: 400);
 
   /// Reverse-geocodes [lat]/[lon] to a short, human place label (e.g.
-  /// "Bandung"), or `null` if it can't be resolved. Retries transient failures
-  /// (rate-limit / timeout / empty) with backoff; a resolved placemark that
-  /// simply has no useful field returns `null` without retrying.
+  /// "Jatiasih, Bekasi"), or `null` if it can't be resolved. Retries transient
+  /// failures (rate-limit / timeout / empty) with backoff; a resolved placemark
+  /// that simply has no useful field returns `null` without retrying.
   static Future<String?> placeName(double lat, double lon) async {
     for (var attempt = 0; attempt < _maxAttempts; attempt++) {
       if (attempt > 0) await Future.delayed(_retryBackoff * attempt);
@@ -41,15 +41,53 @@ class GeocodingService {
     return null; // best-effort: never a hard requirement.
   }
 
-  /// Picks the most useful city/town-level field, most specific first, skipping
-  /// blanks (the platform leaves unknown fields empty rather than null).
+  /// Builds a "subdistrict, city" label (e.g. "Jatiasih, Bekasi" /
+  /// "Menteng, Jakarta Pusat").
+  ///
+  /// Android's Geocoder maps Indonesian addresses like so (verified on-device):
+  /// `subLocality` = kelurahan/desa (too granular — skipped), `locality` =
+  /// kecamatan (the subdistrict we want), `subAdministrativeArea` = kota/
+  /// kabupaten (the city), `administrativeArea` = province. Each field may carry
+  /// an admin-type prefix ("Kota Bekasi", "Kecamatan Jatiasih") which we strip
+  /// down to the bare name.
+  ///
+  /// Falls back gracefully: if only one level resolves, that one is returned;
+  /// duplicate parts collapse to a single name; a placemark with no useful field
+  /// returns `null`.
   static String? _label(Placemark p) {
-    for (final candidate in [
-      p.locality,
-      p.subAdministrativeArea,
-      p.subLocality,
-      p.administrativeArea,
-    ]) {
+    final subdistrict = _clean(_firstNonBlank([p.locality, p.subLocality]));
+    final city = _clean(_firstNonBlank([p.subAdministrativeArea]));
+
+    if (subdistrict != null && city != null && subdistrict != city) {
+      return '$subdistrict, $city';
+    }
+    // Only one level (or they're identical) — prefer the city, then subdistrict,
+    // then province as an absolute last resort.
+    return city ?? subdistrict ?? _clean(_firstNonBlank([p.administrativeArea]));
+  }
+
+  /// Leading Indonesian administrative-type words to drop, so a field like
+  /// "Kota Bekasi" / "Kabupaten Bekasi" / "Kecamatan Jatiasih" becomes just the
+  /// place name. Longest/most-specific first so "Kota Administrasi …" wins over
+  /// a bare "Kota".
+  static final RegExp _adminPrefix = RegExp(
+    r'^(kota administrasi|kabupaten|kota|kecamatan|kelurahan|desa|provinsi|'
+    r'kab\.|kec\.|kel\.)\s+',
+    caseSensitive: false,
+  );
+
+  /// Strips the admin-type prefix from [name] and trims it; returns `null` if
+  /// nothing meaningful is left.
+  static String? _clean(String? name) {
+    if (name == null) return null;
+    final v = name.replaceFirst(_adminPrefix, '').trim();
+    return v.isEmpty ? null : v;
+  }
+
+  /// First trimmed, non-empty value in [candidates] (the platform leaves unknown
+  /// fields as empty strings rather than null), or `null` if none qualify.
+  static String? _firstNonBlank(List<String?> candidates) {
+    for (final candidate in candidates) {
       final v = candidate?.trim();
       if (v != null && v.isNotEmpty) return v;
     }
