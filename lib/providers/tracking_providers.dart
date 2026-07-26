@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../data/database_service.dart';
+import '../data/models/trip.dart';
 import '../services/geocoding_service.dart';
 import '../services/permission_service.dart';
 import '../services/tracking_service.dart';
@@ -32,6 +33,8 @@ class TrackingUiState {
     this.route = const [],
     this.speedSamples = const [],
     this.lastFinished,
+    this.continuingTripId,
+    this.continuingTripName,
     this.error,
   });
 
@@ -50,6 +53,12 @@ class TrackingUiState {
   /// Per-fix (distance, speed) samples for the live chart, in capture order.
   final List<SpeedSample> speedSamples;
   final LiveTelemetry? lastFinished;
+
+  /// When non-null, the next recording is a continuation of this open trip (its
+  /// next leg) — set from the History "Continue" affordance and consumed when
+  /// the leg is saved. [continuingTripName] is carried alongside for display.
+  final int? continuingTripId;
+  final String? continuingTripName;
   final String? error;
 
   TrackingUiState copyWith({
@@ -61,9 +70,12 @@ class TrackingUiState {
     List<LatLng>? route,
     List<SpeedSample>? speedSamples,
     LiveTelemetry? lastFinished,
+    int? continuingTripId,
+    String? continuingTripName,
     String? error,
     bool clearTelemetry = false,
     bool clearFinished = false,
+    bool clearContinuation = false,
     bool clearError = false,
   }) {
     return TrackingUiState(
@@ -75,6 +87,11 @@ class TrackingUiState {
       route: route ?? this.route,
       speedSamples: speedSamples ?? this.speedSamples,
       lastFinished: clearFinished ? null : (lastFinished ?? this.lastFinished),
+      continuingTripId:
+          clearContinuation ? null : (continuingTripId ?? this.continuingTripId),
+      continuingTripName: clearContinuation
+          ? null
+          : (continuingTripName ?? this.continuingTripName),
       error: clearError ? null : (error ?? this.error),
     );
   }
@@ -180,15 +197,72 @@ class TrackingController extends StateNotifier<TrackingUiState> {
     state = state.copyWith(isPaused: false);
   }
 
-  /// Names the just-finished ride (already persisted) and returns to idle,
-  /// clearing the finished summary and route so the next ride starts fresh.
+  /// Standalone save — names the just-finished ride (already persisted), with no
+  /// trip link, and returns to idle so the next ride starts fresh.
   Future<void> saveFinishedRide(String name) async {
+    await _persistLeg(name);
+    _resetToIdle(clearContinuation: true);
+  }
+
+  /// Saves the finished leg into its trip — creating a fresh open trip (named
+  /// after this leg) if this is a first leg, or linking to the trip currently
+  /// being continued — and leaves the trip OPEN so the rider can continue it.
+  Future<void> saveAndContinueTrip(String name) async {
+    final tripId = await _resolveTripId(name);
+    await _persistLeg(name, tripId: tripId);
+    _resetToIdle(clearContinuation: true);
+  }
+
+  /// Saves the finished leg into its trip (creating one if needed) and then
+  /// FINISHES that trip — it accepts no more legs until reopened.
+  Future<void> finishTripWithLeg(String name) async {
+    final tripId = await _resolveTripId(name);
+    await _persistLeg(name, tripId: tripId);
+    await DatabaseService.instance.finishTrip(tripId);
+    _resetToIdle(clearContinuation: true);
+  }
+
+  /// Marks the next recording as the next leg of [tripId]. Set from the History
+  /// "Continue" affordance before the rider starts recording; consumed when that
+  /// leg is saved. [tripName] is carried along for the record-screen banner.
+  void beginContinuation(int tripId, String? tripName) {
+    state = state.copyWith(
+      continuingTripId: tripId,
+      continuingTripName: tripName,
+    );
+  }
+
+  /// Clears a pending continuation — the rider backed out before recording, or
+  /// wants this recording to be a standalone ride after all.
+  void cancelContinuation() =>
+      state = state.copyWith(clearContinuation: true);
+
+  /// Persists the just-finished leg: names it (when a name was given), optionally
+  /// links it to [tripId], then fires the best-effort geocode. Shared by the
+  /// standalone-save and trip-save paths.
+  Future<void> _persistLeg(String name, {int? tripId}) async {
     final t = state.lastFinished;
-    if (t != null && name.trim().isNotEmpty) {
-      await DatabaseService.instance.setRideName(t.rideId, name.trim());
-      _geocodeRide(t.rideId, state.route);
+    if (t == null) return;
+    final trimmed = name.trim();
+    if (trimmed.isNotEmpty) {
+      await DatabaseService.instance.setRideName(t.rideId, trimmed);
     }
-    _resetToIdle();
+    if (tripId != null) {
+      await DatabaseService.instance.setRideTrip(t.rideId, tripId);
+    }
+    _geocodeRide(t.rideId, state.route);
+  }
+
+  /// Resolves the trip this leg belongs to: the trip currently being continued,
+  /// or a freshly-created open trip (named after this first leg).
+  Future<int> _resolveTripId(String legName) async {
+    final existing = state.continuingTripId;
+    if (existing != null) return existing;
+    final trimmed = legName.trim();
+    final trip = Trip()
+      ..createdAt = DateTime.now()
+      ..name = trimmed.isEmpty ? null : trimmed;
+    return DatabaseService.instance.createTrip(trip);
   }
 
   /// Reverse-geocodes the ride's first/last fix and persists the place names —
@@ -222,11 +296,20 @@ class TrackingController extends StateNotifier<TrackingUiState> {
     _resetToIdle();
   }
 
-  /// Dismisses the summary without naming or deleting — the ride stays in the
-  /// DB unnamed (crash-safe default when the rider just backs out).
-  void keepFinishedRide() => _resetToIdle();
+  /// Dismisses the summary without naming or deleting — the ride stays in the DB
+  /// unnamed (crash-safe default when the rider just backs out). If a
+  /// continuation was pending, the leg is still linked to its (open) trip so a
+  /// lazy back-out doesn't orphan it.
+  Future<void> keepFinishedRide() async {
+    final tripId = state.continuingTripId;
+    final t = state.lastFinished;
+    if (tripId != null && t != null) {
+      await DatabaseService.instance.setRideTrip(t.rideId, tripId);
+    }
+    _resetToIdle(clearContinuation: true);
+  }
 
-  void _resetToIdle() {
+  void _resetToIdle({bool clearContinuation = false}) {
     state = state.copyWith(
       isTracking: false,
       isPaused: false,
@@ -236,6 +319,7 @@ class TrackingController extends StateNotifier<TrackingUiState> {
       speedSamples: const [],
       clearTelemetry: true,
       clearFinished: true,
+      clearContinuation: clearContinuation,
     );
   }
 

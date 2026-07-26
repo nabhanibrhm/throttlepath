@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers/history_providers.dart';
+import '../providers/home_providers.dart';
 import '../theme/app_theme.dart';
 import 'history_screen.dart';
 import 'settings_screen.dart';
@@ -23,34 +24,40 @@ class HomeShell extends ConsumerStatefulWidget {
 class _HomeShellState extends ConsumerState<HomeShell> {
   static const int _historyTab = 1;
 
-  int _index = 0;
-
   static const _tabs = <_TabSpec>[
     _TabSpec(icon: Icons.radio_button_checked, label: 'Record'),
     _TabSpec(icon: Icons.history, label: 'History'),
     _TabSpec(icon: Icons.tune, label: 'Settings'),
   ];
 
-  /// Switches tabs. Entering History forces a refetch of the ride list: the
-  /// tabs live in an [IndexedStack], so [HistoryScreen] never unmounts and its
-  /// `autoDispose` provider would otherwise keep serving the snapshot it read
-  /// at launch — never showing rides saved since (the original save bug).
+  /// Switches tabs. Entering History forces a refetch of the ride list and open
+  /// trips: the tabs live in an [IndexedStack], so [HistoryScreen] never
+  /// unmounts and its `autoDispose` providers would otherwise keep serving the
+  /// snapshot they read at launch — never showing rides/trips saved since (the
+  /// original save bug).
   void _onSelectTab(int i) {
     if (i == _historyTab) {
       ref.invalidate(rideHistoryProvider);
+      ref.invalidate(openTripsProvider);
+      // Also the finished trips: a trip just closed from the summary screen
+      // moves out of `openTripsProvider` into this one, and without a refetch its
+      // legs (which carry a tripId, so they're excluded from the standalone list)
+      // would vanish from History entirely.
+      ref.invalidate(finishedTripsProvider);
       // Re-run the best-effort place-name backfill for rides saved offline.
       ref.invalidate(geocodeBackfillProvider);
     }
-    setState(() => _index = i);
+    ref.read(homeTabProvider.notifier).state = i;
   }
 
   @override
   Widget build(BuildContext context) {
     final cx = AppColors.of(context);
+    final index = ref.watch(homeTabProvider);
     return Scaffold(
       backgroundColor: cx.canvas,
       body: IndexedStack(
-        index: _index,
+        index: index,
         children: const [
           TrackingMapScreen(),
           HistoryScreen(),
@@ -59,7 +66,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       ),
       bottomNavigationBar: _BottomNav(
         tabs: _tabs,
-        index: _index,
+        index: index,
         onSelect: _onSelectTab,
       ),
     );

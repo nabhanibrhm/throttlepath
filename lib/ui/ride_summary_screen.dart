@@ -31,12 +31,11 @@ class _RideSummaryScreenState extends ConsumerState<RideSummaryScreen> {
     super.dispose();
   }
 
-  Future<void> _save() async {
+  /// Runs a save/continue/finish action under the busy guard, then pops.
+  Future<void> _run(Future<void> Function(String name) action) async {
     if (_busy) return;
     setState(() => _busy = true);
-    await ref
-        .read(trackingControllerProvider.notifier)
-        .saveFinishedRide(_nameController.text);
+    await action(_nameController.text);
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -55,8 +54,7 @@ class _RideSummaryScreenState extends ConsumerState<RideSummaryScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: cx.surface,
-        title: Text('Discard ride?',
-            style: TextStyle(color: cx.textBright)),
+        title: Text('Discard ride?', style: TextStyle(color: cx.textBright)),
         content: Text(
           'This permanently deletes the ride and its recorded track.',
           style: TextStyle(color: cx.textDim),
@@ -81,132 +79,243 @@ class _RideSummaryScreenState extends ConsumerState<RideSummaryScreen> {
     final cx = AppColors.of(context);
     final t = widget.telemetry;
     final unit = ref.watch(speedUnitProvider);
+    // Trip context: when a continuation is pending this ride is a leg of an open
+    // trip, so the summary offers Continue-later / Finish-trip instead of a
+    // plain save.
+    final tripState = ref.watch(trackingControllerProvider);
+    final continuingTripId = tripState.continuingTripId;
+    final isTripLeg = continuingTripId != null;
+    final tripName = tripState.continuingTripName?.trim();
+    final notifier = ref.read(trackingControllerProvider.notifier);
     return PopScope(
       // Backing out keeps the (already-saved) ride, unnamed.
       canPop: !_busy,
       onPopInvokedWithResult: (didPop, _) {
-        if (didPop) ref.read(trackingControllerProvider.notifier).keepFinishedRide();
+        if (didPop) {
+          ref.read(trackingControllerProvider.notifier).keepFinishedRide();
+        }
       },
       child: Scaffold(
         backgroundColor: cx.canvas,
+        // Let the content scroll when the keyboard shrinks the viewport; the
+        // buttons stay pinned to the bottom (via the Spacer) when there's room.
         body: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'RIDE COMPLETE',
-                  style: TextStyle(
-                    color: cx.accentInk,
-                    fontSize: 14,
-                    letterSpacing: 3,
-                    fontWeight: FontWeight.w700,
+          child: LayoutBuilder(
+            builder: (context, constraints) => SingleChildScrollView(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: IntrinsicHeight(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          isTripLeg ? 'LEG COMPLETE' : 'RIDE COMPLETE',
+                          style: TextStyle(
+                            color: cx.accentInk,
+                            fontSize: 14,
+                            letterSpacing: 3,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        if (isTripLeg) ...[
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.alt_route,
+                                color: cx.textDim,
+                                size: 15,
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  'Part of ${tripName?.isNotEmpty == true ? '“$tripName”' : 'your trip'}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: cx.textDim,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                        const SizedBox(height: 24),
+                        // Distance hero.
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.baseline,
+                          textBaseline: TextBaseline.alphabetic,
+                          children: [
+                            Text(
+                              unit
+                                  .distanceMeters(t.distanceMeters)
+                                  .toStringAsFixed(2),
+                              style: TextStyle(
+                                color: cx.accentInk,
+                                fontSize: 64,
+                                height: 1,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: Text(
+                                unit.distanceLabel,
+                                style: TextStyle(
+                                  color: cx.textDim,
+                                  fontSize: 20,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 28),
+                        Row(
+                          children: [
+                            _SummaryStat(
+                              label: 'TOTAL TIME',
+                              value: _fmtDuration(t.durationSeconds),
+                            ),
+                            _SummaryStat(
+                              label: 'MOVING TIME',
+                              value: _fmtDuration(t.movingSeconds),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 20),
+                        Row(
+                          children: [
+                            _SummaryStat(
+                              label: 'AVG SPEED',
+                              value: unit
+                                  .speed(t.avgSpeedKmh)
+                                  .toStringAsFixed(1),
+                              unit: unit.speedLabel,
+                            ),
+                            _SummaryStat(
+                              label: 'MAX SPEED',
+                              value: unit
+                                  .speed(t.maxSpeedKmh)
+                                  .toStringAsFixed(1),
+                              unit: unit.speedLabel,
+                              color: cx.danger,
+                            ),
+                          ],
+                        ),
+                        const Spacer(),
+                        TextField(
+                          controller: _nameController,
+                          enabled: !_busy,
+                          textCapitalization: TextCapitalization.sentences,
+                          style: TextStyle(color: cx.textBright),
+                          decoration: InputDecoration(
+                            hintText: isTripLeg
+                                ? 'Name this leg (e.g. Leg 2 — to Lembang)'
+                                : 'Name this ride (e.g. Morning commute)',
+                            hintStyle: TextStyle(color: cx.textDim),
+                            filled: true,
+                            fillColor: cx.surface,
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(14),
+                              borderSide: BorderSide(color: cx.border),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(14),
+                              borderSide: BorderSide(color: cx.accentInk),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        // Primary action. Standalone ride → SAVE RIDE. A trip leg →
+                        // CONTINUE LATER (keep the journey open to add more legs).
+                        SizedBox(
+                          height: 60,
+                          child: ElevatedButton(
+                            onPressed: _busy
+                                ? null
+                                : () => _run(
+                                    isTripLeg
+                                        ? notifier.saveAndContinueTrip
+                                        : notifier.saveFinishedRide,
+                                  ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: cx.accent,
+                              foregroundColor: cx.onAccent,
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                            child: Text(
+                              isTripLeg ? 'CONTINUE LATER' : 'SAVE RIDE',
+                              style: const TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        // Secondary action. Standalone ride → start a trip from this
+                        // ride. A trip leg → finish the trip now.
+                        SizedBox(
+                          height: 52,
+                          child: OutlinedButton(
+                            onPressed: _busy
+                                ? null
+                                : () => _run(
+                                    isTripLeg
+                                        ? notifier.finishTripWithLeg
+                                        : notifier.saveAndContinueTrip,
+                                  ),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: cx.accentInk,
+                              side: BorderSide(color: cx.accentInk),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                            child: Text(
+                              isTripLeg
+                                  ? 'FINISH TRIP'
+                                  : 'SAVE & CONTINUE LATER',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          height: 52,
+                          child: OutlinedButton(
+                            onPressed: _busy ? null : _discard,
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: cx.dangerInk,
+                              side: BorderSide(color: cx.dangerInk),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                            child: const Text(
+                              'DISCARD',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-                const SizedBox(height: 24),
-                // Distance hero.
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.baseline,
-                  textBaseline: TextBaseline.alphabetic,
-                  children: [
-                    Text(
-                      unit.distanceMeters(t.distanceMeters).toStringAsFixed(2),
-                      style: TextStyle(
-                        color: cx.accentInk,
-                        fontSize: 64,
-                        height: 1,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Text(unit.distanceLabel,
-                          style: TextStyle(color: cx.textDim, fontSize: 20)),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 28),
-                Row(
-                  children: [
-                    _SummaryStat(
-                        label: 'TOTAL TIME',
-                        value: _fmtDuration(t.durationSeconds)),
-                    _SummaryStat(
-                        label: 'MOVING TIME',
-                        value: _fmtDuration(t.movingSeconds)),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    _SummaryStat(
-                        label: 'AVG SPEED',
-                        value: unit.speed(t.avgSpeedKmh).toStringAsFixed(1),
-                        unit: unit.speedLabel),
-                    _SummaryStat(
-                        label: 'MAX SPEED',
-                        value: unit.speed(t.maxSpeedKmh).toStringAsFixed(1),
-                        unit: unit.speedLabel,
-                        color: cx.danger),
-                  ],
-                ),
-                const Spacer(),
-                TextField(
-                  controller: _nameController,
-                  enabled: !_busy,
-                  textCapitalization: TextCapitalization.sentences,
-                  style: TextStyle(color: cx.textBright),
-                  decoration: InputDecoration(
-                    hintText: 'Name this ride (e.g. Morning commute)',
-                    hintStyle: TextStyle(color: cx.textDim),
-                    filled: true,
-                    fillColor: cx.surface,
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: BorderSide(color: cx.border),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: BorderSide(color: cx.accentInk),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                SizedBox(
-                  height: 60,
-                  child: ElevatedButton(
-                    onPressed: _busy ? null : _save,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: cx.accent,
-                      foregroundColor: cx.onAccent,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16)),
-                    ),
-                    child: const Text('SAVE RIDE',
-                        style: TextStyle(
-                            fontSize: 20, fontWeight: FontWeight.w700)),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                SizedBox(
-                  height: 52,
-                  child: OutlinedButton(
-                    onPressed: _busy ? null : _discard,
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: cx.dangerInk,
-                      side: BorderSide(color: cx.dangerInk),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16)),
-                    ),
-                    child: const Text('DISCARD',
-                        style: TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.w700)),
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
         ),
@@ -245,22 +354,23 @@ class _SummaryStat extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label,
-              style: TextStyle(color: cx.textDim, fontSize: 11)),
+          Text(label, style: TextStyle(color: cx.textDim, fontSize: 11)),
           const SizedBox(height: 8),
           Row(
             crossAxisAlignment: CrossAxisAlignment.baseline,
             textBaseline: TextBaseline.alphabetic,
             children: [
-              Text(value,
-                  style: TextStyle(
-                      color: color ?? cx.accentInk,
-                      fontSize: 26,
-                      fontWeight: FontWeight.w700)),
+              Text(
+                value,
+                style: TextStyle(
+                  color: color ?? cx.accentInk,
+                  fontSize: 26,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
               if (unit.isNotEmpty) ...[
                 const SizedBox(width: 4),
-                Text(unit,
-                    style: TextStyle(color: cx.textDim, fontSize: 12)),
+                Text(unit, style: TextStyle(color: cx.textDim, fontSize: 12)),
               ],
             ],
           ),
