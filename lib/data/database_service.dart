@@ -3,6 +3,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'models/ride.dart';
 import 'models/track_point.dart';
+import 'models/trip.dart';
 
 /// Single owner of the Isar instance for the whole app.
 ///
@@ -34,7 +35,7 @@ class DatabaseService {
 
     final dir = await getApplicationDocumentsDirectory();
     final db = await Isar.open(
-      [RideSchema, TrackPointSchema],
+      [RideSchema, TrackPointSchema, TripSchema],
       directory: dir.path,
     );
     _isar = db;
@@ -51,6 +52,16 @@ class DatabaseService {
   /// All rides, newest first.
   Future<List<Ride>> getAllRides() {
     return isar.rides.where().sortByStartTimeDesc().findAll();
+  }
+
+  /// Standalone rides only (not a leg of any trip), newest first — the flat
+  /// entries in History. Trip legs are shown under their trip instead.
+  Future<List<Ride>> getStandaloneRides() {
+    return isar.rides
+        .filter()
+        .tripIdIsNull()
+        .sortByStartTimeDesc()
+        .findAll();
   }
 
   Future<Ride?> getRideById(int id) => isar.rides.get(id);
@@ -97,6 +108,82 @@ class DatabaseService {
     return isar.writeTxn(() async {
       await isar.trackPoints.filter().rideIdEqualTo(rideId).deleteAll();
       await isar.rides.delete(rideId);
+    });
+  }
+
+  // --- Trip helpers --------------------------------------------------------
+
+  /// Inserts a new trip (or updates an existing one) and returns its id.
+  Future<int> createTrip(Trip trip) {
+    return isar.writeTxn(() => isar.trips.put(trip));
+  }
+
+  Future<Trip?> getTripById(int id) => isar.trips.get(id);
+
+  /// All trips, newest first.
+  Future<List<Trip>> getAllTrips() {
+    return isar.trips.where().sortByCreatedAtDesc().findAll();
+  }
+
+  /// Open (still-continuable) trips — those with no [Trip.finishedAt] — newest
+  /// first. The work-list for the History "Continue" affordance.
+  Future<List<Trip>> getOpenTrips() {
+    return isar.trips
+        .filter()
+        .finishedAtIsNull()
+        .sortByCreatedAtDesc()
+        .findAll();
+  }
+
+  /// Finished (closed) trips — those with a [Trip.finishedAt] — newest first.
+  /// Rendered as trip entries in History.
+  Future<List<Trip>> getFinishedTrips() {
+    return isar.trips
+        .filter()
+        .finishedAtIsNotNull()
+        .sortByCreatedAtDesc()
+        .findAll();
+  }
+
+  /// A trip's legs (rides), ordered oldest-first by start time.
+  Future<List<Ride>> getLegsForTrip(int tripId) {
+    return isar.rides
+        .filter()
+        .tripIdEqualTo(tripId)
+        .sortByStartTime()
+        .findAll();
+  }
+
+  /// Links (or unlinks, with null) a ride to a trip as one of its legs. No-op if
+  /// the ride was deleted before this ran.
+  Future<void> setRideTrip(int rideId, int? tripId) {
+    return isar.writeTxn(() async {
+      final ride = await isar.rides.get(rideId);
+      if (ride == null) return;
+      ride.tripId = tripId;
+      await isar.rides.put(ride);
+    });
+  }
+
+  /// Closes a trip (stamps [Trip.finishedAt]); it no longer accepts new legs
+  /// until reopened. No-op if the trip was deleted.
+  Future<void> finishTrip(int tripId, {DateTime? finishedAt}) {
+    return isar.writeTxn(() async {
+      final trip = await isar.trips.get(tripId);
+      if (trip == null) return;
+      trip.finishedAt = finishedAt ?? DateTime.now();
+      await isar.trips.put(trip);
+    });
+  }
+
+  /// Reopens a finished trip (clears [Trip.finishedAt]) so more legs can be
+  /// added. No-op if the trip was deleted.
+  Future<void> reopenTrip(int tripId) {
+    return isar.writeTxn(() async {
+      final trip = await isar.trips.get(tripId);
+      if (trip == null) return;
+      trip.finishedAt = null;
+      await isar.trips.put(trip);
     });
   }
 

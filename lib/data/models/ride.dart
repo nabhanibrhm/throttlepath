@@ -55,4 +55,10 @@ class Ride {
   /// Human-readable place name reverse-geocoded from the ride's last GPS fix
   /// (e.g. "Lembang"). Null under the same conditions as [startPlace].
   String? endPlace;
+
+  /// Links this ride to a [Trip] as one of its legs, by [Trip.id]. Null for a
+  /// standalone ride (the default). Indexed so a trip's legs can be fetched
+  /// cheaply by trip id. Additive — old rides read as null.
+  @Index()
+  int? tripId;
 }

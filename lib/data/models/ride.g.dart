@@ -68,6 +68,7 @@ const RideSchema = CollectionSchema(
       name: r'totalDistanceMeters',
       type: IsarType.double,
     ),
+    r'tripId': PropertySchema(id: 11, name: r'tripId', type: IsarType.long),
   },
 
   estimateSize: _rideEstimateSize,
@@ -84,6 +85,19 @@ const RideSchema = CollectionSchema(
       properties: [
         IndexPropertySchema(
           name: r'startTime',
+          type: IndexType.value,
+          caseSensitive: false,
+        ),
+      ],
+    ),
+    r'tripId': IndexSchema(
+      id: 7734156669642746260,
+      name: r'tripId',
+      unique: false,
+      replace: false,
+      properties: [
+        IndexPropertySchema(
+          name: r'tripId',
           type: IndexType.value,
           caseSensitive: false,
         ),
@@ -149,6 +163,7 @@ void _rideSerialize(
   writer.writeString(offsets[8], object.startPlace);
   writer.writeDateTime(offsets[9], object.startTime);
   writer.writeDouble(offsets[10], object.totalDistanceMeters);
+  writer.writeLong(offsets[11], object.tripId);
 }
 
 Ride _rideDeserialize(
@@ -170,6 +185,7 @@ Ride _rideDeserialize(
   object.startPlace = reader.readStringOrNull(offsets[8]);
   object.startTime = reader.readDateTime(offsets[9]);
   object.totalDistanceMeters = reader.readDouble(offsets[10]);
+  object.tripId = reader.readLongOrNull(offsets[11]);
   return object;
 }
 
@@ -202,6 +218,8 @@ P _rideDeserializeProp<P>(
       return (reader.readDateTime(offset)) as P;
     case 10:
       return (reader.readDouble(offset)) as P;
+    case 11:
+      return (reader.readLongOrNull(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
   }
@@ -230,6 +248,14 @@ extension RideQueryWhereSort on QueryBuilder<Ride, Ride, QWhere> {
     return QueryBuilder.apply(this, (query) {
       return query.addWhereClause(
         const IndexWhereClause.any(indexName: r'startTime'),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterWhere> anyTripId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(
+        const IndexWhereClause.any(indexName: r'tripId'),
       );
     });
   }
@@ -403,6 +429,128 @@ extension RideQueryWhere on QueryBuilder<Ride, Ride, QWhereClause> {
           lower: [lowerStartTime],
           includeLower: includeLower,
           upper: [upperStartTime],
+          includeUpper: includeUpper,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterWhereClause> tripIdIsNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(
+        IndexWhereClause.equalTo(indexName: r'tripId', value: [null]),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterWhereClause> tripIdIsNotNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(
+        IndexWhereClause.between(
+          indexName: r'tripId',
+          lower: [null],
+          includeLower: false,
+          upper: [],
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterWhereClause> tripIdEqualTo(int? tripId) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(
+        IndexWhereClause.equalTo(indexName: r'tripId', value: [tripId]),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterWhereClause> tripIdNotEqualTo(int? tripId) {
+    return QueryBuilder.apply(this, (query) {
+      if (query.whereSort == Sort.asc) {
+        return query
+            .addWhereClause(
+              IndexWhereClause.between(
+                indexName: r'tripId',
+                lower: [],
+                upper: [tripId],
+                includeUpper: false,
+              ),
+            )
+            .addWhereClause(
+              IndexWhereClause.between(
+                indexName: r'tripId',
+                lower: [tripId],
+                includeLower: false,
+                upper: [],
+              ),
+            );
+      } else {
+        return query
+            .addWhereClause(
+              IndexWhereClause.between(
+                indexName: r'tripId',
+                lower: [tripId],
+                includeLower: false,
+                upper: [],
+              ),
+            )
+            .addWhereClause(
+              IndexWhereClause.between(
+                indexName: r'tripId',
+                lower: [],
+                upper: [tripId],
+                includeUpper: false,
+              ),
+            );
+      }
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterWhereClause> tripIdGreaterThan(
+    int? tripId, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(
+        IndexWhereClause.between(
+          indexName: r'tripId',
+          lower: [tripId],
+          includeLower: include,
+          upper: [],
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterWhereClause> tripIdLessThan(
+    int? tripId, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(
+        IndexWhereClause.between(
+          indexName: r'tripId',
+          lower: [],
+          upper: [tripId],
+          includeUpper: include,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterWhereClause> tripIdBetween(
+    int? lowerTripId,
+    int? upperTripId, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(
+        IndexWhereClause.between(
+          indexName: r'tripId',
+          lower: [lowerTripId],
+          includeLower: includeLower,
+          upper: [upperTripId],
           includeUpper: includeUpper,
         ),
       );
@@ -1590,6 +1738,79 @@ extension RideQueryFilter on QueryBuilder<Ride, Ride, QFilterCondition> {
       );
     });
   }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> tripIdIsNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        const FilterCondition.isNull(property: r'tripId'),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> tripIdIsNotNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        const FilterCondition.isNotNull(property: r'tripId'),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> tripIdEqualTo(int? value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.equalTo(property: r'tripId', value: value),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> tripIdGreaterThan(
+    int? value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.greaterThan(
+          include: include,
+          property: r'tripId',
+          value: value,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> tripIdLessThan(
+    int? value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.lessThan(
+          include: include,
+          property: r'tripId',
+          value: value,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> tripIdBetween(
+    int? lower,
+    int? upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.between(
+          property: r'tripId',
+          lower: lower,
+          includeLower: includeLower,
+          upper: upper,
+          includeUpper: includeUpper,
+        ),
+      );
+    });
+  }
 }
 
 extension RideQueryObject on QueryBuilder<Ride, Ride, QFilterCondition> {}
@@ -1726,6 +1947,18 @@ extension RideQuerySortBy on QueryBuilder<Ride, Ride, QSortBy> {
   QueryBuilder<Ride, Ride, QAfterSortBy> sortByTotalDistanceMetersDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'totalDistanceMeters', Sort.desc);
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterSortBy> sortByTripId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'tripId', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterSortBy> sortByTripIdDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'tripId', Sort.desc);
     });
   }
 }
@@ -1874,6 +2107,18 @@ extension RideQuerySortThenBy on QueryBuilder<Ride, Ride, QSortThenBy> {
       return query.addSortBy(r'totalDistanceMeters', Sort.desc);
     });
   }
+
+  QueryBuilder<Ride, Ride, QAfterSortBy> thenByTripId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'tripId', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterSortBy> thenByTripIdDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'tripId', Sort.desc);
+    });
+  }
 }
 
 extension RideQueryWhereDistinct on QueryBuilder<Ride, Ride, QDistinct> {
@@ -1950,6 +2195,12 @@ extension RideQueryWhereDistinct on QueryBuilder<Ride, Ride, QDistinct> {
       return query.addDistinctBy(r'totalDistanceMeters');
     });
   }
+
+  QueryBuilder<Ride, Ride, QDistinct> distinctByTripId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'tripId');
+    });
+  }
 }
 
 extension RideQueryProperty on QueryBuilder<Ride, Ride, QQueryProperty> {
@@ -2022,6 +2273,12 @@ extension RideQueryProperty on QueryBuilder<Ride, Ride, QQueryProperty> {
   QueryBuilder<Ride, double, QQueryOperations> totalDistanceMetersProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'totalDistanceMeters');
+    });
+  }
+
+  QueryBuilder<Ride, int?, QQueryOperations> tripIdProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'tripId');
     });
   }
 }
