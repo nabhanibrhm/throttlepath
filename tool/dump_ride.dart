@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:isar_community/isar.dart';
 import 'package:throttlepath/data/models/ride.dart';
 import 'package:throttlepath/data/models/track_point.dart';
+import 'package:throttlepath/data/models/trip.dart';
 
 double _haversineMeters(double lat1, double lon1, double lat2, double lon2) {
   const r = 6371000.0;
@@ -23,8 +24,12 @@ Future<void> main(List<String> args) async {
   final wantName = args.length > 1 ? args[1] : 'Afternoon ride test';
 
   await Isar.initializeIsarCore(download: true);
+  // Every collection in the file MUST be listed: Isar DROPS any collection
+  // missing from the schema list on open. Omitting TripSchema silently deleted
+  // the trips from whatever DB this was pointed at — harmless on a pulled copy,
+  // destructive if ever run against the app's own directory.
   final isar = await Isar.open(
-    [RideSchema, TrackPointSchema],
+    [RideSchema, TrackPointSchema, TripSchema],
     directory: dbDir,
     name: 'default',
     inspector: false,
