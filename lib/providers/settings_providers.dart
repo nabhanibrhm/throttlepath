@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/record_view.dart';
+import '../core/speed_gauge_style.dart';
 import '../core/units.dart';
 import '../services/settings_service.dart';
 
@@ -69,4 +70,26 @@ class RecordViewController extends StateNotifier<RecordView> {
 final recordViewProvider =
     StateNotifierProvider<RecordViewController, RecordView>(
   (ref) => RecordViewController(RecordView.none),
+);
+
+/// Holds the live-speed gauge style (digital numeral vs analog arc) and persists
+/// every change.
+class SpeedGaugeStyleController extends StateNotifier<SpeedGaugeStyle> {
+  SpeedGaugeStyleController(super.state);
+
+  Future<void> set(SpeedGaugeStyle style) async {
+    if (style == state) return;
+    state = style;
+    await SettingsService.instance.saveSpeedGaugeStyle(style);
+  }
+
+  /// Flip between the digital readout and the analog gauge.
+  Future<void> toggle() => set(state.next);
+}
+
+/// How the Record screen draws the live speed. Seeded in `main()` (via override)
+/// with the persisted value so the chosen gauge is up on the first frame.
+final speedGaugeStyleProvider =
+    StateNotifierProvider<SpeedGaugeStyleController, SpeedGaugeStyle>(
+  (ref) => SpeedGaugeStyleController(SpeedGaugeStyle.digital),
 );

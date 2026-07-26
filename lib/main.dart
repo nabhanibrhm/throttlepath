@@ -14,6 +14,7 @@ Future<void> main() async {
   final mode = await SettingsService.instance.loadThemeMode();
   final unit = await SettingsService.instance.loadSpeedUnit();
   final recordView = await SettingsService.instance.loadRecordView();
+  final gaugeStyle = await SettingsService.instance.loadSpeedGaugeStyle();
   runApp(
     ProviderScope(
       overrides: [
@@ -21,6 +22,8 @@ Future<void> main() async {
         speedUnitProvider.overrideWith((ref) => SpeedUnitController(unit)),
         recordViewProvider
             .overrideWith((ref) => RecordViewController(recordView)),
+        speedGaugeStyleProvider
+            .overrideWith((ref) => SpeedGaugeStyleController(gaugeStyle)),
       ],
       child: const ThrottlePathApp(),
     ),

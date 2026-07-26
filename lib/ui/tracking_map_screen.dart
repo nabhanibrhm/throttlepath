@@ -9,6 +9,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../core/record_view.dart';
+import '../core/speed_gauge_style.dart';
 import '../core/units.dart';
 import '../providers/history_providers.dart';
 import '../providers/home_providers.dart';
@@ -16,6 +17,7 @@ import '../providers/settings_providers.dart';
 import '../providers/tracking_providers.dart';
 import '../services/permission_service.dart';
 import '../theme/app_theme.dart';
+import 'analog_speed_gauge.dart';
 import 'ride_summary_screen.dart';
 import 'live_speed_chart.dart';
 
@@ -105,6 +107,7 @@ class _TrackingMapScreenState extends ConsumerState<TrackingMapScreen> {
     final state = ref.watch(trackingControllerProvider);
     final view = ref.watch(recordViewProvider);
     final unit = ref.watch(speedUnitProvider);
+    final gaugeStyle = ref.watch(speedGaugeStyleProvider);
     // Best-effort "you're near where a trip ended — continue it?" nudge.
     final nearby = ref.watch(nearbyOpenTripProvider).valueOrNull;
     final dismissedNudges = ref.watch(dismissedTripNudgesProvider);
@@ -249,6 +252,7 @@ class _TrackingMapScreenState extends ConsumerState<TrackingMapScreen> {
                 _TelemetrySheet(
                   state: state,
                   unit: unit,
+                  gaugeStyle: gaugeStyle,
                   onStart: () =>
                       ref.read(trackingControllerProvider.notifier).start(),
                   onStop: () =>
@@ -792,6 +796,7 @@ class _TelemetrySheet extends StatelessWidget {
   const _TelemetrySheet({
     required this.state,
     required this.unit,
+    required this.gaugeStyle,
     required this.onStart,
     required this.onStop,
     required this.onPause,
@@ -800,6 +805,7 @@ class _TelemetrySheet extends StatelessWidget {
 
   final TrackingUiState state;
   final SpeedUnit unit;
+  final SpeedGaugeStyle gaugeStyle;
   final VoidCallback onStart;
   final VoidCallback onStop;
   final VoidCallback onPause;
@@ -862,30 +868,40 @@ class _TelemetrySheet extends StatelessWidget {
                 borderColor: cx.border,
               )
             else ...[
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.baseline,
-                textBaseline: TextBaseline.alphabetic,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    heroNumber,
-                    style: TextStyle(
-                      color: countingDown ? cx.accentInk : cx.textBright,
-                      fontSize: countingDown ? 84 : 60,
-                      height: 1,
-                      fontWeight: FontWeight.w800,
+              // The analog gauge replaces the numeral only for live speed — the
+              // 3-2-1 countdown stays a big digit, since there's nothing to sweep.
+              if (gaugeStyle == SpeedGaugeStyle.analog && !countingDown)
+                AnalogSpeedGauge(
+                  speed: unit.speed(speedKmh),
+                  maxSpeed: unit.speed(t?.maxSpeedKmh ?? 0),
+                  unitLabel: unit.speedLabel,
+                  dimmed: !recording || paused,
+                )
+              else
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      heroNumber,
+                      style: TextStyle(
+                        color: countingDown ? cx.accentInk : cx.textBright,
+                        fontSize: countingDown ? 84 : 60,
+                        height: 1,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
-                  ),
-                  if (!countingDown) ...[
-                    const SizedBox(width: 8),
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Text(unit.speedLabel,
-                          style: TextStyle(color: cx.textDim, fontSize: 18)),
-                    ),
+                    if (!countingDown) ...[
+                      const SizedBox(width: 8),
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(unit.speedLabel,
+                            style: TextStyle(color: cx.textDim, fontSize: 18)),
+                      ),
+                    ],
                   ],
-                ],
-              ),
+                ),
               if (paused) ...[
                 const SizedBox(height: 8),
                 _OutlinePill(label: 'PAUSED', color: cx.accentInk),

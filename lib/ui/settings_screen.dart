@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/speed_gauge_style.dart';
 import '../providers/history_providers.dart';
 import '../providers/settings_providers.dart';
 import '../services/geocode_backfill.dart';
@@ -19,6 +20,7 @@ class SettingsScreen extends ConsumerWidget {
     final cx = AppColors.of(context);
     final isDark = ref.watch(themeModeProvider) == ThemeMode.dark;
     final unit = ref.watch(speedUnitProvider);
+    final gaugeStyle = ref.watch(speedGaugeStyleProvider);
 
     return Scaffold(
       backgroundColor: cx.canvas,
@@ -45,6 +47,18 @@ class SettingsScreen extends ConsumerWidget {
               style: TextStyle(color: cx.textDim, fontSize: 13),
             ),
             onTap: () => ref.read(speedUnitProvider.notifier).toggle(),
+          ),
+          const SizedBox(height: 12),
+          _SettingsTile(
+            icon: gaugeStyle == SpeedGaugeStyle.analog
+                ? Icons.donut_large
+                : Icons.pin_outlined,
+            title: 'Live speed',
+            trailing: Text(
+              gaugeStyle.label,
+              style: TextStyle(color: cx.textDim, fontSize: 13),
+            ),
+            onTap: () => ref.read(speedGaugeStyleProvider.notifier).toggle(),
           ),
           const SizedBox(height: 12),
           _SettingsTile(

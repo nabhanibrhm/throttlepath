@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../core/record_view.dart';
+import '../core/speed_gauge_style.dart';
 import '../core/units.dart';
 
 /// Tiny file-backed store for user preferences. Kept dependency-free (plain file
@@ -19,6 +20,7 @@ class SettingsService {
   static const _fileName = 'settings.txt';
   static const _speedUnitFileName = 'speed_unit.txt';
   static const _recordViewFileName = 'record_view.txt';
+  static const _speedGaugeStyleFileName = 'speed_gauge_style.txt';
 
   File? _file;
 
@@ -98,6 +100,28 @@ class SettingsService {
     try {
       final f = await _resolveNamed(_recordViewFileName);
       await f.writeAsString(view.tag);
+    } catch (_) {
+      // best-effort; the choice still applies for this session
+    }
+  }
+
+  /// Loads the live-speed gauge style. Defaults to [SpeedGaugeStyle.digital]
+  /// (the app's original readout) on first run or any read error.
+  Future<SpeedGaugeStyle> loadSpeedGaugeStyle() async {
+    try {
+      final f = await _resolveNamed(_speedGaugeStyleFileName);
+      if (!await f.exists()) return SpeedGaugeStyle.digital;
+      return SpeedGaugeStyle.fromTag((await f.readAsString()).trim());
+    } catch (_) {
+      return SpeedGaugeStyle.digital;
+    }
+  }
+
+  /// Persists the live-speed gauge style. Best-effort.
+  Future<void> saveSpeedGaugeStyle(SpeedGaugeStyle style) async {
+    try {
+      final f = await _resolveNamed(_speedGaugeStyleFileName);
+      await f.writeAsString(style.tag);
     } catch (_) {
       // best-effort; the choice still applies for this session
     }
