@@ -66,6 +66,18 @@ class DatabaseService {
 
   Future<Ride?> getRideById(int id) => isar.rides.get(id);
 
+  /// The most recently *finished* ride, standalone or trip leg — the "last ride"
+  /// line the Record screen shows while idle. Skips rides with no [Ride.endTime]
+  /// (a recording interrupted by a crash), which would otherwise surface as a
+  /// zero-distance ghost. Null when the rider has no completed rides yet.
+  Future<Ride?> getLatestFinishedRide() {
+    return isar.rides
+        .filter()
+        .endTimeIsNotNull()
+        .sortByStartTimeDesc()
+        .findFirst();
+  }
+
   /// Rides still missing at least one place name, newest first — the work-list
   /// for the best-effort geocode backfill (rides saved while offline, or where
   /// the platform geocoder dropped one of the pair).

@@ -1,46 +1,82 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:throttlepath/core/units.dart';
+import 'package:throttlepath/theme/app_theme.dart';
 import 'package:throttlepath/ui/analog_speed_gauge.dart';
 
+Widget _host(Widget child) => MaterialApp(
+      theme: buildDarkTheme(),
+      home: Scaffold(body: Center(child: child)),
+    );
+
 void main() {
-  group('AnalogSpeedGauge.scaleFor', () {
-    test('a standstill still gets the minimum dial, not a zero-width one', () {
-      expect(AnalogSpeedGauge.scaleFor(0), 60);
+  group('AnalogSpeedGauge.topFor', () {
+    test('the dial is fixed per unit — it does not follow the ride', () {
+      // The whole point of going fixed (F4): the same speed must sit at the
+      // same angle on every ride, so the needle position is learnable.
+      expect(AnalogSpeedGauge.topFor(SpeedUnit.kmh), 120);
+      expect(AnalogSpeedGauge.topFor(SpeedUnit.mph), 80);
     });
 
-    test('slow rides stay on the minimum dial', () {
-      expect(AnalogSpeedGauge.scaleFor(12), 60);
-      expect(AnalogSpeedGauge.scaleFor(59.9), 60);
-      expect(AnalogSpeedGauge.scaleFor(60), 60);
+    test('the top clears the fastest ride recorded so far', () {
+      expect(AnalogSpeedGauge.topFor(SpeedUnit.kmh), greaterThan(107.5));
     });
 
-    test('the top rounds up to the next step once the peak passes it', () {
-      expect(AnalogSpeedGauge.scaleFor(60.1), 80);
-      expect(AnalogSpeedGauge.scaleFor(75), 80);
-      expect(AnalogSpeedGauge.scaleFor(80), 80);
-      expect(AnalogSpeedGauge.scaleFor(81), 100);
-    });
-
-    test('a fast ride keeps headroom above its own peak', () {
-      // The fastest ride in the DB so far.
-      final scale = AnalogSpeedGauge.scaleFor(107.5);
-      expect(scale, 120);
-      expect(scale, greaterThan(107.5));
-    });
-
-    test('the scale never shrinks as the peak grows', () {
-      var previous = 0.0;
-      for (var peak = 0.0; peak <= 200; peak += 3.7) {
-        final scale = AnalogSpeedGauge.scaleFor(peak);
-        expect(scale, greaterThanOrEqualTo(previous));
-        expect(scale, greaterThanOrEqualTo(peak));
-        previous = scale;
+    test('both tops divide into four whole-numbered tick steps', () {
+      // Five major ticks means four gaps; a fractional step would print
+      // labels like "27" on a 110 dial.
+      for (final unit in SpeedUnit.values) {
+        expect(AnalogSpeedGauge.topFor(unit) % 4, 0);
       }
     });
 
-    test('ticks land on whole numbers — the dial is always a multiple of 20', () {
-      for (final peak in [0.0, 33.3, 61.0, 99.9, 140.0, 155.5]) {
-        expect(AnalogSpeedGauge.scaleFor(peak) % 20, 0);
-      }
+    test('the imperial top is close to the metric one in real terms', () {
+      // 80 mph should cover roughly the same ground as 120 km/h, so a rider
+      // switching units does not silently get a very different dial.
+      final imperialAsKmh =
+          AnalogSpeedGauge.topFor(SpeedUnit.mph) / 0.621371;
+      expect(imperialAsKmh, greaterThan(110));
+      expect(imperialAsKmh, lessThan(140));
+    });
+  });
+
+  group('AnalogSpeedGauge rendering', () {
+    testWidgets('the numeral tells the truth when the needle pins', (t) async {
+      // Over the top of the scale the arc has nowhere left to go, but the
+      // number in the dial's mouth must never lie about the speed.
+      await t.pumpWidget(_host(const AnalogSpeedGauge(
+        speed: 143,
+        maxSpeed: 143,
+        topOfScale: 120,
+        unitLabel: 'km/h',
+      )));
+      await t.pumpAndSettle();
+      expect(find.text('143'), findsOneWidget);
+    });
+
+    testWidgets('a standstill renders without dividing by the scale', (t) async {
+      await t.pumpWidget(_host(const AnalogSpeedGauge(
+        speed: 0,
+        maxSpeed: 0,
+        topOfScale: 120,
+        unitLabel: 'km/h',
+        dimmed: true,
+      )));
+      await t.pumpAndSettle();
+      expect(find.text('0'), findsWidgets);
+      expect(t.takeException(), isNull);
+    });
+
+    testWidgets('the imperial dial labels its own scale, not the metric one',
+        (t) async {
+      await t.pumpWidget(_host(AnalogSpeedGauge(
+        speed: 40,
+        maxSpeed: 55,
+        topOfScale: AnalogSpeedGauge.topFor(SpeedUnit.mph),
+        unitLabel: 'mph',
+      )));
+      await t.pumpAndSettle();
+      expect(find.text('mph'), findsOneWidget);
     });
   });
 }

@@ -53,17 +53,60 @@ Nothing else lands cleanly before this.
 ## Phase 2 — Ride screen: mode switcher + idle context
 *fixes F1, F2, F3, F4, F5, F7, F8 · ~1 week*
 
-- [ ] 2.1 New `lib/core/ride_display_mode.dart` — `RideDisplayMode{dial, number, map, chart}`. Delete `record_view.dart` + `speed_gauge_style.dart`.
-- [ ] 2.2 `SettingsService`: one `ride_display_mode.txt`, reading the two legacy pref files once for continuity, then writing the merged one.
-- [ ] 2.3 Inline `SegmentedButton` switcher on the Record screen (Dial · Number · Map · Chart), persisted. Settings keeps a mirror row, reframed as "Default speed display".
-- [ ] 2.4 Dial rescales 0–120 with a 60 midpoint tick; **delete the redundant horizontal slider** under the dial (F4 — same value shown three times).
-- [ ] 2.5 Chart mode becomes a real mode on the same grid, not a floating overlay — fixes the clipped title + overlapping chip (F8) and the analog-gauge sheet clipping logged during the screenshot pass.
-- [ ] 2.6 Idle screen: drop the four zeroed stats (F5). Show GPS readiness + accuracy, and a **last ride** row. *(Week strip is Phase 5 — it needs aggregate queries.)*
-- [ ] 2.7 Battery-saver "Show map" boxed button → quiet status row with a text link (F2). One filled button per screen, ever.
-- [ ] 2.8 Recenter becomes the only floating control, 52dp; layer/collapse moves into the switcher; all icon targets ≥48dp (F7).
-- [ ] 2.9 Logo shrinks to the app bar; the freed upper area carries context (F3).
+Split into **2A** (no state loss, shipped) and **2B** (the enum merge, still to decide —
+see the note under 2.1).
 
-**Verify:** analyze · test · device.
+### 2A ✅ BUILT & DEVICE-VERIFIED (2026-07-27)
+
+- [x] 2.4 Dial is now a **fixed** 0–120 km/h (0–80 mph) scale with an emphasised midpoint
+      tick, replacing the adaptive `scaleFor(maxSpeed)` — a dial that rescales mid-ride
+      points the same speed at a different angle every time, which is the one thing an
+      analog readout must not do. Over the top the needle pins and the numeral stays true.
+- [x] 2.6 Idle sheet drops the four zeroed stats (F5) for a GPS-readiness row + a **last
+      ride** row. Readiness is probed with `isLocationServiceEnabled` + `checkPermission`
+      only — cached platform state, no GPS wake and **no permission prompt on app open**;
+      an accuracy figure appears only once a real fix exists. New `getLatestFinishedRide()`
+      + `latestRideProvider`. *(Week strip is Phase 5 — it needs aggregate queries.)*
+- [x] 2.7 Battery-saver "Show map" boxed button → quiet status row with an amber text link
+      (F2). START RIDE is now the only filled control on the screen.
+- [x] 2.9 Backdrop logo 72px → a 26px mark beside a small wordmark, moved to the upper
+      third (F3).
+- [~] 2.8 Partial (F7): the view toggle drops its amber outline for neutral ink so recenter
+      is unambiguously the action, and both gained `Semantics` labels. Both were already
+      52dp. **Merging layer/collapse into the switcher is 2B.**
+- [x] Chart-mode empty state biased out from behind the sheet, and the live chart's height
+      fraction cut 0.5 → 0.40 so its x-axis clears the sheet. A stopgap: 2.5 replaces it.
+- [x] Map attribution exempted from the 12sp floor at 10sp — licence boilerplate was
+      outranking the street names underneath it.
+
+**Two audit corrections found by building it:**
+1. **F4's "redundant horizontal slider under the dial" was never a slider.** It was the
+   needle parked at zero: a uniform-width, round-capped bar lying flat across the mouth of
+   the dial, passing through the `0` label, ending in a filled dot — the exact anatomy of a
+   track and thumb. Shortening it didn't help; the giveaway is the constant width. Fixed by
+   drawing the needle as a tapered wedge. (Earlier triage wrongly concluded no slider
+   existed because `grep` found no `Slider` widget.)
+2. **F3's "upper area carries the context" is only reachable in one backdrop.** The context
+   went into the sheet instead, so it shows in map, chart *and* hidden mode rather than
+   only battery-saver.
+
+**Verified:** `flutter analyze` clean in `lib/` + `test/` (35 pre-existing `avoid_print`
+infos in `tool/` only) · 80 tests green · installed with `adb install -r`, ride DB intact ·
+both themes, both units, all three backdrops walked · logcat clean of overflows.
+
+### 2B — not started
+
+- [ ] 2.1 New `lib/core/ride_display_mode.dart` — `RideDisplayMode{dial, number, map, chart}`. Delete `record_view.dart` + `speed_gauge_style.dart`.
+      **⚠ Re-check before building.** The two enums are orthogonal: `RecordView{map,chart,none}`
+      × `SpeedGaugeStyle{digital,analog}` = **six** reachable states. A flat 4-way switcher
+      deletes three of them and makes the analog dial mutually exclusive with every backdrop
+      — including map + dial, which is what the phone is running today. F1's actual complaint
+      is that the control lives in Settings, which one inline control can fix without
+      collapsing the matrix.
+- [ ] 2.2 `SettingsService`: one `ride_display_mode.txt`, reading the two legacy pref files once for continuity, then writing the merged one.
+- [ ] 2.3 Inline switcher on the Record screen, persisted. Settings keeps a mirror row, reframed as "Default speed display".
+- [ ] 2.5 Chart mode becomes a real mode on the same grid, not a floating overlay — fixes the clipped title + overlapping chip (F8) properly.
+- [ ] 2.8 rest — layer/collapse folds into the switcher.
 
 ---
 

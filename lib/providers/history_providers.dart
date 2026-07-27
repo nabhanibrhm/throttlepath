@@ -18,6 +18,14 @@ final rideHistoryProvider = FutureProvider.autoDispose<List<Ride>>((ref) {
   return DatabaseService.instance.getStandaloneRides();
 });
 
+/// The single most recent finished ride — the "last ride" context line the
+/// Record screen shows in place of four zeroed stats before a ride starts.
+/// Auto-disposes, so it refetches every time the Record screen returns to idle
+/// and picks up the ride just saved.
+final latestRideProvider = FutureProvider.autoDispose<Ride?>((ref) {
+  return DatabaseService.instance.getLatestFinishedRide();
+});
+
 /// Fires the best-effort geocode backfill when watched (i.e. when the History
 /// screen builds). Re-attempts rides that still lack place names and refreshes
 /// the list as they fill in. Invalidated alongside [rideHistoryProvider] on

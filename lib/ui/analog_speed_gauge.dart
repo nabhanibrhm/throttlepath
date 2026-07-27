@@ -10,13 +10,16 @@ import '../theme/app_theme.dart';
 /// the digital readout kept in the middle (the numeral is still the fastest way
 /// to read an exact value — the arc is what makes it glanceable).
 ///
-/// **Adaptive scale.** The top of the dial follows the ride's own peak, rounded
-/// up to the next [_scaleStep] with a [_minScale] floor, so a slow city ride uses
-/// the whole sweep instead of hugging the left stop. The trade-off is deliberate:
-/// the same speed points at different angles on different rides. The scale only
-/// ever grows within a ride (it tracks the max, which is monotonic), and both the
-/// needle and the scale change are animated so the sweep glides rather than
-/// snaps.
+/// **Fixed scale.** The dial spans 0 to [topFor] the rider's unit — 0–120 km/h
+/// or 0–80 mph — with a labelled tick at the midpoint. It deliberately does *not*
+/// follow the ride's own peak: a dial that rescales mid-ride points the same
+/// speed at a different angle every time, which destroys the one thing an analog
+/// readout is for (recognising a speed by needle position without reading it).
+/// A rider learns "straight up is half" once and keeps it.
+///
+/// Above the top of the scale the needle pins, but the numeral in the mouth
+/// keeps showing the true speed — the dial is the glanceable layer, the numeral
+/// is the authoritative one.
 ///
 /// All speeds in and out are **display-unit** values (already converted by
 /// [SpeedUnit]) — the gauge does no unit maths of its own.
@@ -25,6 +28,7 @@ class AnalogSpeedGauge extends StatelessWidget {
     super.key,
     required this.speed,
     required this.maxSpeed,
+    required this.topOfScale,
     required this.unitLabel,
     this.dimmed = false,
   });
@@ -32,9 +36,11 @@ class AnalogSpeedGauge extends StatelessWidget {
   /// Current speed, in display units.
   final double speed;
 
-  /// The ride's peak speed so far, in display units — drives the dial's range
-  /// and is marked on the track.
+  /// The ride's peak speed so far, in display units — marked on the track.
   final double maxSpeed;
+
+  /// Top of the dial, in display units. Use [topFor].
+  final double topOfScale;
 
   /// `km/h` or `mph`, shown under the numeral.
   final String unitLabel;
@@ -42,26 +48,18 @@ class AnalogSpeedGauge extends StatelessWidget {
   /// Greys the sweep out (paused / not recording) while keeping the dial legible.
   final bool dimmed;
 
-  /// Smallest top-of-scale, so a standstill or a walking-pace ride still reads
-  /// against a sane dial rather than a hair-trigger one.
-  static const double _minScale = 60;
-
-  /// The dial's top rounds up to a multiple of this.
-  static const double _scaleStep = 20;
-
   /// Widest the dial gets, whatever the sheet offers.
   static const double _maxWidth = 280;
 
-  /// Top of the dial for a given ride peak.
-  static double scaleFor(double maxSpeed) {
-    final needed = math.max(maxSpeed, _minScale);
-    return (needed / _scaleStep).ceil() * _scaleStep;
-  }
+  /// The fixed top of the dial for [unit]. 120 km/h covers every ride in the
+  /// database with headroom; 80 mph (≈129 km/h) is the nearest round imperial
+  /// equivalent, and keeps the tick labels whole (0/20/40/60/80).
+  static double topFor(SpeedUnit unit) => unit == SpeedUnit.mph ? 80 : 120;
 
   @override
   Widget build(BuildContext context) {
     final cx = AppColors.of(context);
-    final scale = scaleFor(maxSpeed);
+    final scale = topOfScale;
     final clamped = speed.clamp(0.0, scale);
 
     return LayoutBuilder(
@@ -94,6 +92,7 @@ class AnalogSpeedGauge extends StatelessWidget {
                   // Neutral, not red: red is reserved for irreversible actions.
                   peak: cx.peak,
                   tickLabel: cx.textTertiary,
+                  anchorTick: cx.textDim,
                 ),
                 child: Padding(
                   // Numeral sits inside the arc's mouth.
@@ -140,6 +139,7 @@ class _GaugePainter extends CustomPainter {
     required this.needle,
     required this.peak,
     required this.tickLabel,
+    required this.anchorTick,
   });
 
   /// Current speed as 0..1 of the dial.
@@ -156,6 +156,9 @@ class _GaugePainter extends CustomPainter {
   final Color needle;
   final Color peak;
   final Color tickLabel;
+
+  /// The midpoint tick + label, drawn brighter than the rest.
+  final Color anchorTick;
 
   static const double _stroke = 14;
   static const int _majorTicks = 5; // 0, ¼, ½, ¾, max
@@ -183,15 +186,18 @@ class _GaugePainter extends CustomPainter {
       canvas.drawArc(rect, math.pi, math.pi * fraction, false, sweepPaint);
     }
 
-    // Ticks + labels just inside the track.
+    // Ticks + labels just inside the track. The midpoint (straight up) is drawn
+    // longer and brighter: on a fixed dial it is the landmark the rider learns,
+    // and it turns "roughly two thirds" into "a bit past half" at a glance.
     for (var i = 0; i < _majorTicks; i++) {
       final t = i / (_majorTicks - 1);
+      final midpoint = i == _majorTicks ~/ 2;
       final angle = math.pi + math.pi * t;
       final outer = radius - _stroke / 2 - 2;
-      final inner = outer - 8;
+      final inner = outer - (midpoint ? 13 : 8);
       final tickPaint = Paint()
-        ..color = tickLabel
-        ..strokeWidth = 2
+        ..color = midpoint ? anchorTick : tickLabel
+        ..strokeWidth = midpoint ? 3 : 2
         ..strokeCap = StrokeCap.round;
       canvas.drawLine(
         center + Offset(math.cos(angle) * inner, math.sin(angle) * inner),
@@ -204,14 +210,16 @@ class _GaugePainter extends CustomPainter {
         text: TextSpan(
           text: label,
           style: TextStyle(
-            color: tickLabel,
+            color: midpoint ? anchorTick : tickLabel,
             fontSize: 12,
-            fontWeight: FontWeight.w600,
+            fontWeight: midpoint ? FontWeight.w800 : FontWeight.w600,
           ),
         ),
         textDirection: TextDirection.ltr,
       )..layout();
-      final labelR = inner - 14;
+      // Measured off the standard tick length, not [inner] — otherwise the
+      // longer midpoint tick would drag its own label out of line with the rest.
+      final labelR = outer - 8 - 14;
       final lp = center +
           Offset(math.cos(angle) * labelR, math.sin(angle) * labelR) -
           Offset(tp.width / 2, tp.height / 2);
@@ -236,19 +244,34 @@ class _GaugePainter extends CustomPainter {
       );
     }
 
-    // Needle: hub at the centre, tip just short of the track.
+    // Needle: a tapered wedge from the hub to a point, not a stroked line.
+    //
+    // This is the audit's "redundant horizontal slider under the dial" (F4) —
+    // except there was never a slider. It was the needle parked at zero: a
+    // uniform-width, round-capped bar lying flat across the mouth of the dial
+    // with a filled dot at one end, which is precisely the anatomy of a track
+    // and thumb. Shortening it doesn't help; the giveaway is the constant width.
+    // A wedge that starts wide at the hub and narrows to a point can only be
+    // read as a pointer, at any angle.
     final needleAngle = math.pi + math.pi * fraction;
-    final needlePaint = Paint()
-      ..color = needle
-      ..strokeWidth = 3.5
-      ..strokeCap = StrokeCap.round;
+    final needleLength = radius - _stroke - 20;
     final tip = center +
-        Offset(math.cos(needleAngle) * (radius - _stroke),
-            math.sin(needleAngle) * (radius - _stroke));
-    // Counterweight: a stub the other side of the hub, like a real needle.
-    final tail = center -
-        Offset(math.cos(needleAngle) * 12, math.sin(needleAngle) * 12);
-    canvas.drawLine(tail, tip, needlePaint);
+        Offset(math.cos(needleAngle) * needleLength,
+            math.sin(needleAngle) * needleLength);
+    final perpendicular = needleAngle + math.pi / 2;
+    const baseHalfWidth = 5.0;
+    final baseOffset = Offset(math.cos(perpendicular) * baseHalfWidth,
+        math.sin(perpendicular) * baseHalfWidth);
+    canvas.drawPath(
+      Path()
+        ..moveTo(tip.dx, tip.dy)
+        ..lineTo(center.dx + baseOffset.dx, center.dy + baseOffset.dy)
+        ..lineTo(center.dx - baseOffset.dx, center.dy - baseOffset.dy)
+        ..close(),
+      Paint()
+        ..color = needle
+        ..style = PaintingStyle.fill,
+    );
     canvas.drawCircle(center, 6, Paint()..color = needle);
     canvas.drawCircle(
       center,
@@ -264,5 +287,10 @@ class _GaugePainter extends CustomPainter {
       old.maxFraction != maxFraction ||
       old.sweep != sweep ||
       old.needle != needle ||
-      old.track != track;
+      old.track != track ||
+      // A theme flip changes only the colours; without these the dial keeps
+      // painting the old palette until the next fix moves the needle.
+      old.peak != peak ||
+      old.tickLabel != tickLabel ||
+      old.anchorTick != anchorTick;
 }

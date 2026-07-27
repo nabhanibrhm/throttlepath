@@ -11,6 +11,7 @@ import 'package:latlong2/latlong.dart';
 import '../core/record_view.dart';
 import '../core/speed_gauge_style.dart';
 import '../core/units.dart';
+import '../data/models/ride.dart';
 import '../providers/history_providers.dart';
 import '../providers/home_providers.dart';
 import '../providers/settings_providers.dart';
@@ -49,6 +50,35 @@ class _TrackingMapScreenState extends ConsumerState<TrackingMapScreen> {
   LatLng? _myLocation;
   bool _locating = false;
 
+  /// Reported accuracy (metres) of the last fix this session, or null if we
+  /// haven't asked for one yet. Feeds the idle GPS-readiness row so it can say
+  /// "±8 m" instead of only "location is on".
+  double? _lastAccuracyMeters;
+
+  /// The telemetry sheet's measured height, remeasured after every frame.
+  final GlobalKey _sheetKey = GlobalKey();
+  double _sheetHeight = 0;
+
+  /// Where to put the rider so they land in the middle of the *visible* map.
+  ///
+  /// The map is full-bleed but the telemetry sheet covers its bottom ~40%, so
+  /// centring on the widget's own centre parked the rider's marker underneath
+  /// the sheet. Lifting the camera by half the sheet's height centres the marker
+  /// in the strip that's actually on screen. Zero until the sheet is measured,
+  /// which is harmless — that's the old behaviour.
+  Offset get _cameraOffset => Offset(0, -_sheetHeight / 2);
+
+  /// Reads the sheet's laid-out height. Deliberately not `setState` — this only
+  /// feeds camera maths, and rebuilding here would loop.
+  void _measureSheet() {
+    final box = _sheetKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box != null && box.hasSize) _sheetHeight = box.size.height;
+  }
+
+  /// Centres the camera on [target] in the visible strip above the sheet.
+  void _moveCamera(LatLng target, double zoom) =>
+      _mapController.move(target, zoom, offset: _cameraOffset);
+
   /// Advances the backdrop view map → chart → none → map (the choice is
   /// persisted via [recordViewProvider]). Leaving the map tears down the
   /// FlutterMap widget, so its controller detaches — reset [_mapReady].
@@ -78,9 +108,12 @@ class _TrackingMapScreenState extends ConsumerState<TrackingMapScreen> {
       );
       if (!mounted) return;
       final here = LatLng(pos.latitude, pos.longitude);
-      setState(() => _myLocation = here);
+      setState(() {
+        _myLocation = here;
+        _lastAccuracyMeters = pos.accuracy;
+      });
       if (moveCamera && _mapReady) {
-        _mapController.move(here, 16);
+        _moveCamera(here, 16);
       }
     } catch (e) {
       if (mounted) _showError('Could not get your location. Try again.');
@@ -120,7 +153,7 @@ class _TrackingMapScreenState extends ConsumerState<TrackingMapScreen> {
           _mapReady &&
           t?.lat != null &&
           t?.lon != null) {
-        _mapController.move(LatLng(t!.lat!, t.lon!), _mapController.camera.zoom);
+        _moveCamera(LatLng(t!.lat!, t.lon!), _mapController.camera.zoom);
       }
       // A ride just finished → open the summary screen once.
       if (next.lastFinished != null && prev?.lastFinished == null) {
@@ -144,6 +177,11 @@ class _TrackingMapScreenState extends ConsumerState<TrackingMapScreen> {
     });
 
     final current = _currentLatLng(state);
+
+    // The sheet grows and shrinks with the ride phase (idle context vs. the
+    // 4-up grid, one button vs. two), so its height is remeasured every frame
+    // rather than assumed once.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _measureSheet());
 
     return Scaffold(
       backgroundColor: cx.canvas,
@@ -250,9 +288,11 @@ class _TrackingMapScreenState extends ConsumerState<TrackingMapScreen> {
                     ),
                   ),
                 _TelemetrySheet(
+                  key: _sheetKey,
                   state: state,
                   unit: unit,
                   gaugeStyle: gaugeStyle,
+                  accuracyMeters: _lastAccuracyMeters,
                   onStart: () =>
                       ref.read(trackingControllerProvider.notifier).start(),
                   onStop: () =>
@@ -318,7 +358,10 @@ class _MapAttribution extends StatelessWidget {
           color: cx.canvas.withValues(alpha: 0.5),
           child: Text(
             '© OpenStreetMap · CARTO',
-            style: TextStyle(color: cx.textTertiary, fontSize: 12),
+            // Exempt from the 12sp floor, like the share card: this is tile
+            // licence boilerplate, not something a rider reads at arm's length,
+            // and at 12sp it outranked the street names it sits on top of.
+            style: TextStyle(color: cx.textTertiary, fontSize: 10),
           ),
         ),
       ),
@@ -529,31 +572,36 @@ class _LocateButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cx = AppColors.of(context);
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(16),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-        child: Material(
-          color: cx.surface.withValues(alpha: 0.72),
-          child: InkWell(
-            onTap: busy ? null : onTap,
-            child: Container(
-              width: 52,
-              height: 52,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
-                border:
-                    Border.all(color: cx.accentInk.withValues(alpha: 0.35)),
+    return Semantics(
+      button: true,
+      enabled: !busy,
+      label: busy ? 'Finding your location' : 'Centre the map on me',
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+          child: Material(
+            color: cx.surface.withValues(alpha: 0.72),
+            child: InkWell(
+              onTap: busy ? null : onTap,
+              child: Container(
+                width: 52,
+                height: 52,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  border:
+                      Border.all(color: cx.accentInk.withValues(alpha: 0.55)),
+                ),
+                child: busy
+                    ? SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2.4, color: cx.accentInk),
+                      )
+                    : Icon(Icons.my_location, color: cx.accentInk),
               ),
-              child: busy
-                  ? SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2.4, color: cx.accentInk),
-                    )
-                  : Icon(Icons.my_location, color: cx.accentInk),
             ),
           ),
         ),
@@ -563,8 +611,12 @@ class _LocateButton extends StatelessWidget {
 }
 
 /// Glass pill that cycles the backdrop view (map → chart → none). Shows the
-/// current view's icon + label; tapping advances to the next. Mirrors the
-/// locate button's styling; sits to its left above the telemetry sheet.
+/// current view's icon + label; tapping advances to the next.
+///
+/// Rendered in neutral ink rather than amber (F7): it and the recenter button
+/// used to carry the identical amber outline, so neither read as more important
+/// than the other. Recenter is the action, this is a mode indicator — recenter
+/// keeps the accent.
 class _ViewToggleButton extends StatelessWidget {
   const _ViewToggleButton({required this.view, required this.onTap});
 
@@ -574,37 +626,41 @@ class _ViewToggleButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cx = AppColors.of(context);
-    final (IconData icon, String label) = switch (view) {
-      RecordView.map => (Icons.map, 'Map'),
-      RecordView.chart => (Icons.show_chart, 'Chart'),
-      RecordView.none => (Icons.visibility_off_outlined, 'Hidden'),
+    final (IconData icon, String label, String next) = switch (view) {
+      RecordView.map => (Icons.map, 'Map', 'the live chart'),
+      RecordView.chart => (Icons.show_chart, 'Chart', 'no backdrop'),
+      RecordView.none => (Icons.visibility_off_outlined, 'Hidden', 'the map'),
     };
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(16),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-        child: Material(
-          color: cx.surface.withValues(alpha: 0.72),
-          child: InkWell(
-            onTap: onTap,
-            child: Container(
-              height: 52,
-              padding: const EdgeInsets.symmetric(horizontal: 18),
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
-                border:
-                    Border.all(color: cx.accentInk.withValues(alpha: 0.35)),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(icon, color: cx.accentInk, size: 20),
-                  const SizedBox(width: 8),
-                  Text(label,
-                      style: TextStyle(
-                          color: cx.accentInk, fontWeight: FontWeight.w600)),
-                ],
+    return Semantics(
+      button: true,
+      label: 'Backdrop: $label. Switch to $next.',
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+          child: Material(
+            color: cx.surface.withValues(alpha: 0.72),
+            child: InkWell(
+              onTap: onTap,
+              child: Container(
+                height: 52,
+                padding: const EdgeInsets.symmetric(horizontal: 18),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: cx.border),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(icon, color: cx.textBright, size: 20),
+                    const SizedBox(width: 8),
+                    Text(label,
+                        style: TextStyle(
+                            color: cx.textBright,
+                            fontWeight: FontWeight.w600)),
+                  ],
+                ),
               ),
             ),
           ),
@@ -632,33 +688,39 @@ class _ChartBackdrop extends StatelessWidget {
     if (samples.length < 2) {
       return Container(
         color: cx.canvas,
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.show_chart, size: 56, color: cx.accentInk),
-              const SizedBox(height: 18),
-              Text(
-                'Speed / distance',
-                style: TextStyle(
-                  color: cx.accentInk,
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
+        child: SafeArea(
+          child: Align(
+            // Upper third, matching [_StatsBackdrop]: a centred block puts its
+            // own caption behind the telemetry sheet, which is what left this
+            // state showing a lone floating icon.
+            alignment: const Alignment(0, -0.55),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.show_chart, size: 40, color: cx.textTertiary),
+                const SizedBox(height: 14),
+                Text(
+                  'Speed / distance',
+                  style: TextStyle(
+                    color: cx.textBright,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 48),
-                child: Text(
-                  state.phase == 'recording'
-                      ? 'Charting your speed as you cover distance…'
-                      : 'Your live speed vs. distance chart appears here as you ride.',
-                  textAlign: TextAlign.center,
-                  style:
-                      TextStyle(color: cx.textDim, fontSize: 14, height: 1.5),
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 48),
+                  child: Text(
+                    state.phase == 'recording'
+                        ? 'Charting your speed as you cover distance…'
+                        : 'Your live speed vs. distance chart appears here as you ride.',
+                    textAlign: TextAlign.center,
+                    style:
+                        TextStyle(color: cx.textDim, fontSize: 13, height: 1.5),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       );
@@ -676,7 +738,10 @@ class _ChartBackdrop extends StatelessWidget {
             // Keep the live chart compact and anchored near the top so both the
             // SPEED (y) and DISTANCE (x) axes stay fully visible above the
             // telemetry sheet — a full-bleed chart hides the x-axis behind it.
-            final h = math.min(300.0, c.maxHeight * 0.5);
+            // 0.5 still ran the x-axis under the sheet, which is roughly the
+            // bottom 44% of the stack. Phase 2.5 replaces this guess by laying
+            // the chart out on the same grid as the sheet instead of behind it.
+            final h = math.min(300.0, c.maxHeight * 0.40);
             return Align(
               alignment: Alignment.topCenter,
               child: Padding(
@@ -697,10 +762,17 @@ class _ChartBackdrop extends StatelessWidget {
   }
 }
 
-/// Lightweight backdrop shown in place of the map (default) — no tiles, no
-/// blur, so the GPU stays idle and the screen can sleep while recording
-/// continues in the background service. Mirrors the prototype's map-hidden
-/// state: branded wordmark, a hint, and a "Show map" pill.
+/// Lightweight backdrop shown in place of the map — no tiles, no blur, so the
+/// GPU stays idle and the screen can sleep while recording continues in the
+/// background service.
+///
+/// Deliberately quiet (F2, F3). The old version put a 72px logo in the middle of
+/// the screen and a bordered "Show map" pill under it — the only boxed button
+/// above the fold, which made *hiding the map* look like the screen's primary
+/// action while START RIDE sat below it. Now the wordmark is a small mark in the
+/// upper third and the way back to the map is a text link inside a status line.
+/// The rider's actual pre-ride context lives in the sheet ([_IdleContext]), where
+/// it shows in every backdrop rather than only this one.
 class _StatsBackdrop extends StatelessWidget {
   const _StatsBackdrop({required this.state, required this.onShowMap});
 
@@ -713,75 +785,72 @@ class _StatsBackdrop extends StatelessWidget {
     final recording = state.phase == 'recording';
     return Container(
       color: cx.canvas,
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Brand mark (same asset as the launcher icon / share card), tinted
-            // to the theme's amber so it reads on either canvas.
-            Image.asset(
-              'assets/icon/logo_foreground.png',
-              width: 72,
-              height: 72,
-              color: cx.accentInk,
-              filterQuality: FilterQuality.medium,
-            ),
-            const SizedBox(height: 10),
-            Text(
-              'ThrottlePath',
-              style: TextStyle(
-                color: cx.accentInk,
-                fontSize: 24,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 48),
-              child: Text(
-                recording
-                    ? 'Recording in the background — the screen can sleep to save battery.'
-                    : 'Map hidden to save battery. Tap below to view your route.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: cx.textDim, fontSize: 14, height: 1.5),
-              ),
-            ),
-            const SizedBox(height: 18),
-            _ShowMapButton(onTap: onShowMap),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Outline pill inside the map-hidden backdrop that reveals the live map.
-class _ShowMapButton extends StatelessWidget {
-  const _ShowMapButton({required this.onTap});
-
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final cx = AppColors.of(context);
-    return Material(
-      color: Colors.transparent,
-      shape: StadiumBorder(side: BorderSide(color: cx.border)),
-      child: InkWell(
-        onTap: onTap,
-        customBorder: const StadiumBorder(),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-          child: Row(
+      child: SafeArea(
+        child: Align(
+          // Upper third: everything below it belongs to the telemetry sheet,
+          // which overlaps a centred block on a short screen.
+          alignment: const Alignment(0, -0.55),
+          child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.map_outlined, color: cx.textBright, size: 17),
-              const SizedBox(width: 8),
-              Text('Show map',
-                  style: TextStyle(
-                      color: cx.textBright,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600)),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Image.asset(
+                    'assets/icon/logo_foreground.png',
+                    width: 26,
+                    height: 26,
+                    color: cx.textTertiary,
+                    filterQuality: FilterQuality.medium,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'ThrottlePath',
+                    style: TextStyle(
+                      color: cx.textTertiary,
+                      fontSize: 15,
+                      letterSpacing: 0.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 26),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.visibility_off_outlined,
+                        size: 15, color: cx.textDim),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        recording
+                            ? 'Map hidden — recording in the background'
+                            : 'Map hidden to save battery',
+                        style: TextStyle(color: cx.textDim, fontSize: 13),
+                      ),
+                    ),
+                    // A link, not a button: the one filled control on this
+                    // screen is START RIDE, and nothing else may compete with it.
+                    TextButton(
+                      onPressed: onShowMap,
+                      style: TextButton.styleFrom(
+                        foregroundColor: cx.accentInk,
+                        // Visually a link, but still a full 48dp touch target.
+                        minimumSize: const Size(0, 48),
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                      ),
+                      child: const Text(
+                        'Show map',
+                        style: TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ],
           ),
         ),
@@ -794,9 +863,11 @@ class _ShowMapButton extends StatelessWidget {
 /// start/stop control.
 class _TelemetrySheet extends StatelessWidget {
   const _TelemetrySheet({
+    super.key,
     required this.state,
     required this.unit,
     required this.gaugeStyle,
+    required this.accuracyMeters,
     required this.onStart,
     required this.onStop,
     required this.onPause,
@@ -806,6 +877,10 @@ class _TelemetrySheet extends StatelessWidget {
   final TrackingUiState state;
   final SpeedUnit unit;
   final SpeedGaugeStyle gaugeStyle;
+
+  /// Accuracy of the latest fix, for the idle readiness row. Null until the
+  /// rider has located themselves this session.
+  final double? accuracyMeters;
   final VoidCallback onStart;
   final VoidCallback onStop;
   final VoidCallback onPause;
@@ -829,6 +904,9 @@ class _TelemetrySheet extends StatelessWidget {
     // While tracking, show live telemetry; when stopped, show the last ride's
     // finalised summary if present.
     final t = tracking ? state.telemetry : (state.lastFinished ?? state.telemetry);
+    // Is there a ride to report on at all? True from the moment START is pressed
+    // until the finished ride is saved or discarded; false on a resting screen.
+    final hasTelemetry = tracking || state.lastFinished != null;
     final speedKmh = (recording && !paused) ? (t?.speedKmh ?? 0) : 0.0;
     // Big speed number: the countdown while starting, otherwise the live speed
     // (converted to the rider's chosen unit). While acquiring, the number is
@@ -874,6 +952,7 @@ class _TelemetrySheet extends StatelessWidget {
                 AnalogSpeedGauge(
                   speed: unit.speed(speedKmh),
                   maxSpeed: unit.speed(t?.maxSpeedKmh ?? 0),
+                  topOfScale: AnalogSpeedGauge.topFor(unit),
                   unitLabel: unit.speedLabel,
                   dimmed: !recording || paused,
                 )
@@ -915,29 +994,36 @@ class _TelemetrySheet extends StatelessWidget {
               ],
             ],
             const SizedBox(height: 18),
-            Row(
-              children: [
-                _Metric(
-                    label: 'DIST',
-                    value: unit
-                        .distanceMeters(t?.distanceMeters ?? 0)
-                        .toStringAsFixed(2),
-                    unit: unit.distanceLabel),
-                _Metric(
-                    label: 'TIME',
-                    value: _fmtDuration(t?.durationSeconds ?? 0),
-                    unit: 'min'),
-                _Metric(
-                    label: 'AVG',
-                    value: unit.speed(t?.avgSpeedKmh ?? 0).toStringAsFixed(1),
-                    unit: unit.speedLabel),
-                _Metric(
-                    label: 'PEAK',
-                    value: unit.speed(t?.maxSpeedKmh ?? 0).toStringAsFixed(1),
-                    unit: unit.speedLabel,
-                    color: cx.peak),
-              ],
-            ),
+            // Before a ride there is nothing to put in the 4-up grid, and four
+            // zeroes read as broken rather than empty. Show the two things that
+            // actually answer "should I hit start?" instead; the grid returns the
+            // moment there is data in it.
+            if (hasTelemetry)
+              Row(
+                children: [
+                  _Metric(
+                      label: 'DIST',
+                      value: unit
+                          .distanceMeters(t?.distanceMeters ?? 0)
+                          .toStringAsFixed(2),
+                      unit: unit.distanceLabel),
+                  _Metric(
+                      label: 'TIME',
+                      value: _fmtDuration(t?.durationSeconds ?? 0),
+                      unit: 'min'),
+                  _Metric(
+                      label: 'AVG',
+                      value: unit.speed(t?.avgSpeedKmh ?? 0).toStringAsFixed(1),
+                      unit: unit.speedLabel),
+                  _Metric(
+                      label: 'PEAK',
+                      value: unit.speed(t?.maxSpeedKmh ?? 0).toStringAsFixed(1),
+                      unit: unit.speedLabel,
+                      color: cx.peak),
+                ],
+              )
+            else
+              _IdleContext(unit: unit, accuracyMeters: accuracyMeters),
             const SizedBox(height: 20),
             if (!tracking)
               _SheetButton(
@@ -1198,6 +1284,207 @@ class _OutlinePill extends StatelessWidget {
           fontWeight: FontWeight.w700,
         ),
       ),
+    );
+  }
+}
+
+/// What the sheet shows before a ride starts, in place of four zeroed stats
+/// (F5): whether recording will work if START is pressed, and what the last ride
+/// was — the two questions a rider actually has on a resting screen.
+///
+/// It lives in the sheet rather than in the empty upper area the audit points
+/// at, because the sheet is the one region present in *all* three backdrops —
+/// map, chart and hidden — so the context follows the rider instead of only
+/// appearing in battery-saver mode.
+class _IdleContext extends ConsumerWidget {
+  const _IdleContext({required this.unit, required this.accuracyMeters});
+
+  final SpeedUnit unit;
+  final double? accuracyMeters;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final latest = ref.watch(latestRideProvider);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _GpsReadinessRow(accuracyMeters: accuracyMeters),
+        const SizedBox(height: 14),
+        // Fixed height in every state — loading, empty and populated — so the
+        // sheet doesn't jolt upward when the query lands a frame later.
+        SizedBox(
+          height: _LastRideRow.height,
+          child: latest.hasValue
+              ? _LastRideRow(ride: latest.value, unit: unit)
+              : null,
+        ),
+      ],
+    );
+  }
+}
+
+/// Whether GPS is going to work, established *without* waking the receiver:
+/// `isLocationServiceEnabled` and `checkPermission` both read cached platform
+/// state, and neither raises a permission prompt — important, because this row
+/// renders on app open and a surprise system dialog there would be hostile.
+///
+/// An accuracy figure only appears once something else (the map opening, or the
+/// locate button) has produced a real fix; we never claim a precision we haven't
+/// measured.
+class _GpsReadinessRow extends StatefulWidget {
+  const _GpsReadinessRow({required this.accuracyMeters});
+
+  final double? accuracyMeters;
+
+  @override
+  State<_GpsReadinessRow> createState() => _GpsReadinessRowState();
+}
+
+enum _GpsReadiness { checking, servicesOff, permissionNeeded, ready }
+
+class _GpsReadinessRowState extends State<_GpsReadinessRow> {
+  _GpsReadiness _state = _GpsReadiness.checking;
+
+  @override
+  void initState() {
+    super.initState();
+    _probe();
+  }
+
+  Future<void> _probe() async {
+    var next = _GpsReadiness.ready;
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        next = _GpsReadiness.servicesOff;
+      } else {
+        final perm = await Geolocator.checkPermission();
+        if (perm != LocationPermission.always &&
+            perm != LocationPermission.whileInUse) {
+          next = _GpsReadiness.permissionNeeded;
+        }
+      }
+    } catch (_) {
+      // A platform that won't answer is not a platform we can promise a fix on.
+      next = _GpsReadiness.permissionNeeded;
+    }
+    if (mounted) setState(() => _state = next);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cx = AppColors.of(context);
+    final accuracy = widget.accuracyMeters;
+    final (Color color, String label) = switch (_state) {
+      _GpsReadiness.checking => (cx.textDim, 'Checking GPS…'),
+      _GpsReadiness.servicesOff => (cx.accentInk, 'Location is off'),
+      _GpsReadiness.permissionNeeded =>
+        (cx.accentInk, 'Location permission needed'),
+      _GpsReadiness.ready => accuracy != null
+          ? (cx.positiveInk, 'GPS ready · ±${accuracy.round()} m')
+          : (cx.positiveInk, 'Location on — GPS locks at start'),
+    };
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: color,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              fontFeatures: kTabularFigures,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// One quiet two-line recap of the previous ride, or an invitation when there
+/// isn't one yet. Both states share a shape so the sheet stays put.
+class _LastRideRow extends StatelessWidget {
+  const _LastRideRow({required this.ride, required this.unit});
+
+  final Ride? ride;
+  final SpeedUnit unit;
+
+  /// Reserved height, so loading / empty / populated are all the same size.
+  static const double height = 38;
+
+  static const _months = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', //
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final cx = AppColors.of(context);
+    final r = ride;
+
+    final String heading;
+    final String? trailing;
+    final String detail;
+    if (r == null) {
+      heading = 'NO RIDES YET';
+      trailing = null;
+      detail = 'Press START to record your first.';
+    } else {
+      final when = r.startTime.toLocal();
+      heading = 'LAST RIDE';
+      trailing = '${_months[when.month - 1]} ${when.day}';
+      final distance =
+          unit.distanceMeters(r.totalDistanceMeters).toStringAsFixed(2);
+      final minutes = (r.durationSeconds / 60).round();
+      final name = r.name?.trim();
+      final parts = [
+        if (name != null && name.isNotEmpty) name,
+        '$distance ${unit.distanceLabel}',
+        '$minutes min',
+      ];
+      detail = parts.join(' · ');
+    }
+
+    final labelStyle = TextStyle(
+      color: cx.textTertiary,
+      fontSize: kMinFontSize,
+      letterSpacing: 1.0,
+      fontWeight: FontWeight.w600,
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          children: [
+            Text(heading, style: labelStyle),
+            const Spacer(),
+            if (trailing != null) Text(trailing, style: labelStyle),
+          ],
+        ),
+        const SizedBox(height: 3),
+        Text(
+          detail,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: r == null ? cx.textDim : cx.textBright,
+            fontSize: 14,
+            fontWeight: r == null ? FontWeight.w500 : FontWeight.w700,
+            fontFeatures: kTabularFigures,
+          ),
+        ),
+      ],
     );
   }
 }
