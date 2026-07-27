@@ -318,7 +318,7 @@ class _MapAttribution extends StatelessWidget {
           color: cx.canvas.withValues(alpha: 0.5),
           child: Text(
             '© OpenStreetMap · CARTO',
-            style: TextStyle(color: cx.textDim, fontSize: 9),
+            style: TextStyle(color: cx.textTertiary, fontSize: 12),
           ),
         ),
       ),
@@ -369,7 +369,7 @@ class _ContinuingTripBanner extends StatelessWidget {
                             'CONTINUING TRIP',
                             style: TextStyle(
                               color: cx.accentInk,
-                              fontSize: 10,
+                              fontSize: 12,
                               letterSpacing: 1.5,
                               fontWeight: FontWeight.w800,
                             ),
@@ -459,7 +459,7 @@ class _NearbyTripBanner extends StatelessWidget {
                             'NEAR A TRIP’S END',
                             style: TextStyle(
                               color: cx.accentInk,
-                              fontSize: 10,
+                              fontSize: 12,
                               letterSpacing: 1.5,
                               fontWeight: FontWeight.w800,
                             ),
@@ -890,6 +890,10 @@ class _TelemetrySheet extends StatelessWidget {
                         fontSize: countingDown ? 84 : 60,
                         height: 1,
                         fontWeight: FontWeight.w800,
+                        // Without tabular digits this readout re-flows on every
+                        // GPS tick as "1" and "8" swap widths — the single
+                        // worst thing you can do to a number read in motion.
+                        fontFeatures: kTabularFigures,
                       ),
                     ),
                     if (!countingDown) ...[
@@ -928,10 +932,10 @@ class _TelemetrySheet extends StatelessWidget {
                     value: unit.speed(t?.avgSpeedKmh ?? 0).toStringAsFixed(1),
                     unit: unit.speedLabel),
                 _Metric(
-                    label: 'MAX',
+                    label: 'PEAK',
                     value: unit.speed(t?.maxSpeedKmh ?? 0).toStringAsFixed(1),
                     unit: unit.speedLabel,
-                    color: cx.danger),
+                    color: cx.peak),
               ],
             ),
             const SizedBox(height: 20),
@@ -970,7 +974,7 @@ class _TelemetrySheet extends StatelessWidget {
               const SizedBox(height: 10),
               Text(
                 'Hold STOP for ${_stopHoldSeconds.toStringAsFixed(1)}s to end ride',
-                style: TextStyle(color: cx.textDim, fontSize: 11),
+                style: TextStyle(color: cx.textTertiary, fontSize: 12),
               ),
             ],
           ],
@@ -1219,18 +1223,19 @@ class _Metric extends StatelessWidget {
         children: [
           Text(label,
               style: TextStyle(
-                  color: cx.textDim, fontSize: 11, letterSpacing: 0.5)),
+                  color: cx.textTertiary, fontSize: 12, letterSpacing: 0.5)),
           const SizedBox(height: 5),
           Text(value,
               style: TextStyle(
                   color: color ?? cx.textBright,
                   fontSize: 20,
-                  fontWeight: FontWeight.w700)),
+                  fontWeight: FontWeight.w700,
+                  fontFeatures: kTabularFigures)),
           if (unit.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 2),
               child: Text(unit,
-                  style: TextStyle(color: cx.textDim, fontSize: 11)),
+                  style: TextStyle(color: cx.textTertiary, fontSize: 12)),
             ),
         ],
       ),

@@ -82,7 +82,11 @@ class SpeedDistanceChart extends StatelessWidget {
       strokeWidth: 1,
       dashArray: const [4, 4],
     );
-    final tickStyle = TextStyle(color: cx.textDim, fontSize: 11);
+    final tickStyle = TextStyle(
+      color: cx.textTertiary,
+      fontSize: 12,
+      fontFeatures: kTabularFigures,
+    );
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 12, 16, 4),
@@ -114,7 +118,7 @@ class SpeedDistanceChart extends StatelessWidget {
                   leftTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
-                      reservedSize: 34,
+                      reservedSize: 38, // room for the 12sp floor
                       interval: yInterval,
                       getTitlesWidget: (v, meta) =>
                           Text(fmtTick(v, yInterval), style: tickStyle),
@@ -123,7 +127,7 @@ class SpeedDistanceChart extends StatelessWidget {
                   bottomTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
-                      reservedSize: 26,
+                      reservedSize: 28, // room for the 12sp floor
                       interval: xInterval,
                       // Skip the ragged label at the exact right edge (maxX =
                       // total distance); keep only the round-number ticks.
@@ -150,8 +154,9 @@ class SpeedDistanceChart extends StatelessWidget {
                                 '${s.x.toStringAsFixed(2)} ${unit.distanceLabel}\n',
                                 TextStyle(
                                   color: cx.textDim,
-                                  fontSize: 11,
+                                  fontSize: 12,
                                   fontWeight: FontWeight.w500,
+                                  fontFeatures: kTabularFigures,
                                 ),
                                 children: [
                                   TextSpan(

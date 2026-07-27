@@ -148,7 +148,7 @@ class _NavButton extends StatelessWidget {
             spec.label,
             style: TextStyle(
               color: color,
-              fontSize: 11,
+              fontSize: 12,
               fontWeight: active ? FontWeight.w700 : FontWeight.w600,
             ),
           ),

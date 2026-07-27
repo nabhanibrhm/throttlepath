@@ -75,7 +75,11 @@ class LiveSpeedChart extends StatelessWidget {
       dashArray: const [4, 4],
     );
     const hiddenLine = FlLine(color: Color(0x00000000), strokeWidth: 0);
-    final tickStyle = TextStyle(color: cx.textDim, fontSize: 11);
+    final tickStyle = TextStyle(
+      color: cx.textTertiary,
+      fontSize: 12,
+      fontFeatures: kTabularFigures,
+    );
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 24, 16, 4),
@@ -108,7 +112,7 @@ class LiveSpeedChart extends StatelessWidget {
                   leftTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
-                      reservedSize: 34,
+                      reservedSize: 38, // room for the 12sp floor
                       interval: yInterval,
                       getTitlesWidget: (v, meta) =>
                           Text(fmtTick(v, yInterval), style: tickStyle),
@@ -117,7 +121,7 @@ class LiveSpeedChart extends StatelessWidget {
                   bottomTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
-                      reservedSize: 26,
+                      reservedSize: 28, // room for the 12sp floor
                       interval: xInterval,
                       // Round-number ticks only — no ragged edge labels, and
                       // nothing in the negative-distance runway.

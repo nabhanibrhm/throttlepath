@@ -91,8 +91,9 @@ class AnalogSpeedGauge extends StatelessWidget {
                   track: cx.border,
                   sweep: dimmed ? cx.textDim : cx.accentInk,
                   needle: dimmed ? cx.textDim : cx.textBright,
-                  peak: cx.danger,
-                  tickLabel: cx.textDim,
+                  // Neutral, not red: red is reserved for irreversible actions.
+                  peak: cx.peak,
+                  tickLabel: cx.textTertiary,
                 ),
                 child: Padding(
                   // Numeral sits inside the arc's mouth.
@@ -107,6 +108,7 @@ class AnalogSpeedGauge extends StatelessWidget {
                           fontSize: 52,
                           height: 1,
                           fontWeight: FontWeight.w800,
+                          fontFeatures: kTabularFigures,
                         ),
                       ),
                       const SizedBox(height: 2),
@@ -203,7 +205,7 @@ class _GaugePainter extends CustomPainter {
           text: label,
           style: TextStyle(
             color: tickLabel,
-            fontSize: 11,
+            fontSize: 12,
             fontWeight: FontWeight.w600,
           ),
         ),

@@ -210,7 +210,7 @@ class _OpenTripCard extends StatelessWidget {
                     'OPEN TRIP',
                     style: TextStyle(
                       color: cx.accentInk,
-                      fontSize: 11,
+                      fontSize: 12,
                       letterSpacing: 2,
                       fontWeight: FontWeight.w800,
                     ),
@@ -311,7 +311,7 @@ class _TripCard extends StatelessWidget {
                           'TRIP · $legLabel',
                           style: TextStyle(
                             color: cx.accentInk,
-                            fontSize: 11,
+                            fontSize: 12,
                             letterSpacing: 1.5,
                             fontWeight: FontWeight.w800,
                           ),
@@ -382,9 +382,9 @@ class _TripCard extends StatelessWidget {
                     value: unit.speed(stats.averageSpeedKmh).toStringAsFixed(0),
                   ),
                   _MiniStat(
-                    label: 'MAX',
+                    label: 'PEAK',
                     value: unit.speed(stats.maxSpeedKmh).toStringAsFixed(0),
-                    color: cx.danger,
+                    color: cx.peak,
                   ),
                 ],
               ),
@@ -522,9 +522,9 @@ class _RideCard extends StatelessWidget {
                       value: unit.speed(ride.averageSpeedKmh).toStringAsFixed(0),
                     ),
                     _MiniStat(
-                      label: 'MAX',
+                      label: 'PEAK',
                       value: unit.speed(ride.maxSpeedKmh).toStringAsFixed(0),
-                      color: cx.danger,
+                      color: cx.peak,
                     ),
                   ],
                 ),
@@ -592,7 +592,11 @@ class _MiniStat extends StatelessWidget {
         children: [
           Text(
             label,
-            style: TextStyle(color: cx.textDim, fontSize: 10),
+            style: TextStyle(
+              color: cx.textTertiary,
+              fontSize: 12,
+              letterSpacing: 0.6,
+            ),
           ),
           const SizedBox(height: 4),
           Text(
@@ -601,6 +605,7 @@ class _MiniStat extends StatelessWidget {
               color: color ?? cx.textBright,
               fontSize: 15,
               fontWeight: FontWeight.w700,
+              fontFeatures: kTabularFigures,
             ),
           ),
         ],

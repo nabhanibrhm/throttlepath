@@ -339,8 +339,9 @@ class _SpeedLegend extends StatelessWidget {
     final cx = AppColors.of(context);
     final labelStyle = TextStyle(
       color: cx.textBright,
-      fontSize: 10,
+      fontSize: 12,
       fontWeight: FontWeight.w600,
+      fontFeatures: kTabularFigures,
     );
     return Container(
       padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
@@ -355,8 +356,8 @@ class _SpeedLegend extends StatelessWidget {
         children: [
           Text('SPEED',
               style: TextStyle(
-                color: cx.textDim,
-                fontSize: 9,
+                color: cx.textTertiary,
+                fontSize: 12,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 1,
               )),
@@ -499,10 +500,10 @@ class _SummaryPanel extends StatelessWidget {
                   unit: unit.speedLabel,
                 ),
                 _Stat(
-                  label: 'MAX SPEED',
+                  label: 'PEAK SPEED',
                   value: unit.speed(ride.maxSpeedKmh).toStringAsFixed(1),
                   unit: unit.speedLabel,
-                  color: cx.danger,
+                  color: cx.peak,
                 ),
               ],
             ),
@@ -744,7 +745,7 @@ class _Stat extends StatelessWidget {
         children: [
           Text(
             label,
-            style: TextStyle(color: cx.textDim, fontSize: 11),
+            style: TextStyle(color: cx.textTertiary, fontSize: 12),
           ),
           const SizedBox(height: 6),
           Row(
@@ -757,6 +758,7 @@ class _Stat extends StatelessWidget {
                   color: color ?? cx.textBright,
                   fontSize: 24,
                   fontWeight: FontWeight.w700,
+                  fontFeatures: kTabularFigures,
                 ),
               ),
               if (unit.isNotEmpty) ...[

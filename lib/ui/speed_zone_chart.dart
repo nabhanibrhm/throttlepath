@@ -84,7 +84,7 @@ class SpeedZoneChart extends StatelessWidget {
             showTitle: secs[i] / total >= 0.05,
             titleStyle: const TextStyle(
               color: Colors.white,
-              fontSize: 11,
+              fontSize: 12,
               fontWeight: FontWeight.w700,
             ),
           ),
@@ -133,8 +133,8 @@ class SpeedZoneChart extends StatelessWidget {
                       Text(
                         'TOTAL',
                         style: TextStyle(
-                          color: cx.textDim,
-                          fontSize: 10,
+                          color: cx.textTertiary,
+                          fontSize: 12,
                           letterSpacing: 1,
                           fontWeight: FontWeight.w700,
                         ),

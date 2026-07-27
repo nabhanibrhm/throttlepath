@@ -203,12 +203,12 @@ class _RideSummaryScreenState extends ConsumerState<RideSummaryScreen> {
                               unit: unit.speedLabel,
                             ),
                             _SummaryStat(
-                              label: 'MAX SPEED',
+                              label: 'PEAK SPEED',
                               value: unit
                                   .speed(t.maxSpeedKmh)
                                   .toStringAsFixed(1),
                               unit: unit.speedLabel,
-                              color: cx.danger,
+                              color: cx.peak,
                             ),
                           ],
                         ),
@@ -410,7 +410,7 @@ class _SummaryStat extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: TextStyle(color: cx.textDim, fontSize: 11)),
+          Text(label, style: TextStyle(color: cx.textTertiary, fontSize: 12)),
           const SizedBox(height: 8),
           Row(
             crossAxisAlignment: CrossAxisAlignment.baseline,
@@ -422,6 +422,7 @@ class _SummaryStat extends StatelessWidget {
                   color: color ?? cx.accentInk,
                   fontSize: 26,
                   fontWeight: FontWeight.w700,
+                  fontFeatures: kTabularFigures,
                 ),
               ),
               if (unit.isNotEmpty) ...[

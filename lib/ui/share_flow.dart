@@ -297,7 +297,7 @@ class _LayoutTile extends StatelessWidget {
           Text(layout.blurb,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: cx.textDim, fontSize: 11)),
+              style: TextStyle(color: cx.textTertiary, fontSize: 12)),
         ],
       ),
     );

@@ -313,7 +313,7 @@ class _OpenBadge extends StatelessWidget {
         textAlign: TextAlign.center,
         style: TextStyle(
           color: cx.accentInk,
-          fontSize: 11,
+          fontSize: 12,
           letterSpacing: 1.5,
           fontWeight: FontWeight.w800,
         ),
@@ -518,10 +518,10 @@ class _TripSummaryPanel extends StatelessWidget {
                 unit: unit.speedLabel,
               ),
               _Stat(
-                label: 'MAX SPEED',
+                label: 'PEAK SPEED',
                 value: unit.speed(stats.maxSpeedKmh).toStringAsFixed(1),
                 unit: unit.speedLabel,
-                color: cx.danger,
+                color: cx.peak,
               ),
             ],
           ),
@@ -530,8 +530,8 @@ class _TripSummaryPanel extends StatelessWidget {
           Text(
             'LEGS',
             style: TextStyle(
-              color: cx.textDim,
-              fontSize: 11,
+              color: cx.textTertiary,
+              fontSize: 12,
               letterSpacing: 1.5,
               fontWeight: FontWeight.w700,
             ),
@@ -631,8 +631,8 @@ class _LegRow extends StatelessWidget {
                     Text(
                       'LEG ${index + 1}',
                       style: TextStyle(
-                        color: cx.textDim,
-                        fontSize: 10,
+                        color: cx.textTertiary,
+                        fontSize: 12,
                         letterSpacing: 1,
                         fontWeight: FontWeight.w700,
                       ),
@@ -666,7 +666,7 @@ class _LegRow extends StatelessWidget {
                       PlaceRouteLabel(
                         startPlace: leg.startPlace,
                         endPlace: leg.endPlace,
-                        fontSize: 11,
+                        fontSize: 12,
                       ),
                     ],
                   ],
@@ -688,7 +688,7 @@ class _LegRow extends StatelessWidget {
                       text: ' ${unit.distanceLabel}',
                       style: TextStyle(
                         color: cx.textDim,
-                        fontSize: 11,
+                        fontSize: 12,
                         fontWeight: FontWeight.w500,
                       ),
                     ),
@@ -724,7 +724,7 @@ class _Stat extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: TextStyle(color: cx.textDim, fontSize: 11)),
+          Text(label, style: TextStyle(color: cx.textTertiary, fontSize: 12)),
           const SizedBox(height: 6),
           Row(
             crossAxisAlignment: CrossAxisAlignment.baseline,
@@ -736,6 +736,7 @@ class _Stat extends StatelessWidget {
                   color: color ?? cx.textBright,
                   fontSize: 24,
                   fontWeight: FontWeight.w700,
+                  fontFeatures: kTabularFigures,
                 ),
               ),
               if (unit.isNotEmpty) ...[

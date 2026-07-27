@@ -169,7 +169,7 @@ class ElevationSpeedChart extends StatelessWidget {
                   leftTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
-                      reservedSize: 34,
+                      reservedSize: 38, // room for the 12sp floor
                       interval: maxY / 2,
                       getTitlesWidget: (v, meta) => Text(
                         v.toStringAsFixed(0),
@@ -180,7 +180,7 @@ class ElevationSpeedChart extends StatelessWidget {
                   rightTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
-                      reservedSize: 40,
+                      reservedSize: 44, // room for the 12sp floor
                       interval: maxY / 2,
                       getTitlesWidget: (v, meta) {
                         final metres = eMin + (v / maxY) * eRange;
@@ -194,11 +194,15 @@ class ElevationSpeedChart extends StatelessWidget {
                   bottomTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
-                      reservedSize: 24,
+                      reservedSize: 28, // room for the 12sp floor
                       interval: maxX / 4,
                       getTitlesWidget: (v, meta) => Text(
                         _fmtClock(v.round()),
-                        style: TextStyle(color: cx.textDim, fontSize: 10),
+                        style: TextStyle(
+                          color: cx.textTertiary,
+                          fontSize: 12,
+                          fontFeatures: kTabularFigures,
+                        ),
                       ),
                     ),
                   ),
@@ -237,7 +241,7 @@ class ElevationSpeedChart extends StatelessWidget {
           Center(
             child: Text(
               'Time',
-              style: TextStyle(color: cx.textDim, fontSize: 11),
+              style: TextStyle(color: cx.textTertiary, fontSize: 12),
             ),
           ),
           const SizedBox(height: 18),
@@ -253,8 +257,11 @@ class ElevationSpeedChart extends StatelessWidget {
     );
   }
 
-  TextStyle _tick(AppPalette cx, Color color) =>
-      TextStyle(color: color.withValues(alpha: 0.9), fontSize: 10);
+  TextStyle _tick(AppPalette cx, Color color) => TextStyle(
+        color: color.withValues(alpha: 0.9),
+        fontSize: 12,
+        fontFeatures: kTabularFigures,
+      );
 
   /// Centred moving average over [window] samples, clamped at the ends. Returns
   /// the input unchanged when there's too little to smooth.
@@ -324,7 +331,7 @@ class _ElevStat extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: TextStyle(color: cx.textDim, fontSize: 11)),
+          Text(label, style: TextStyle(color: cx.textTertiary, fontSize: 12)),
           const SizedBox(height: 6),
           Text(
             value,

@@ -125,7 +125,7 @@ class AccelBrakeChart extends StatelessWidget {
                   leftTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
-                      reservedSize: 34,
+                      reservedSize: 38, // room for the 12sp floor
                       interval: maxY,
                       getTitlesWidget: (v, meta) {
                         if (v.abs() < 0.001) {
@@ -138,7 +138,7 @@ class AccelBrakeChart extends StatelessWidget {
                   bottomTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
-                      reservedSize: 24,
+                      reservedSize: 28, // room for the 12sp floor
                       interval: maxX / 4,
                       getTitlesWidget: (v, meta) => Text(
                         _fmtClock(v.round()),
@@ -154,7 +154,7 @@ class AccelBrakeChart extends StatelessWidget {
           Center(
             child: Text(
               'Time',
-              style: TextStyle(color: cx.textDim, fontSize: 11),
+              style: TextStyle(color: cx.textTertiary, fontSize: 12),
             ),
           ),
           const SizedBox(height: 16),
@@ -176,7 +176,11 @@ class AccelBrakeChart extends StatelessWidget {
     );
   }
 
-  TextStyle _tick(AppPalette cx) => TextStyle(color: cx.textDim, fontSize: 10);
+  TextStyle _tick(AppPalette cx) => TextStyle(
+        color: cx.textTertiary,
+        fontSize: 12,
+        fontFeatures: kTabularFigures,
+      );
 }
 
 /// One summary line under the scatter: colour dot + label + detail + count.
