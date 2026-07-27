@@ -12,7 +12,7 @@ Per `CLAUDE.md`: strict phased delivery — finish one phase, stop, confirm on-d
 | # | Question | Decision | Why |
 |---|----------|----------|-----|
 | 1 | Inter or Barlow? | **Keep Inter.** | Bundled Inter TTFs already carry a `tnum` table — `FontFeature.tabularFigures()` works today. Barlow buys only the condensed live-speed numeral. If 64sp feels too wide on-device, add Barlow Semi Condensed later as one extra family for that single number (~40 KB). |
-| 2 | Merge the mode enums? | **Yes — merge.** `RecordView{map,chart,none}` × `SpeedGaugeStyle{digital,analog}` → one `RideDisplayMode{dial,number,map,chart}`. | Matches F1 + F4 ("one representation per mode") and makes all four modes discoverable. **Cost: map + analog-dial together becomes unreachable.** Accepted — a dial inside the map sheet would be too small to read anyway. |
+| 2 | Merge the mode enums? | ~~Yes — merge into `RideDisplayMode{dial,number,map,chart}`.~~ **REVERSED 2026-07-27: keep both axes.** `RecordView` and `SpeedGaugeStyle` stay separate; one inline control exposes both. | The merge was accepted believing it cost one combination. It doesn't: the enums are orthogonal, so 3 backdrops × 2 gauges = **six** reachable states, and flattening to four deletes three of them — map+dial (in use today), chart+dial and off+dial. F1's actual complaint is that the control lives in Settings, three taps from what it changes; that's fixable with one inline control without collapsing the matrix. |
 | 3 | Route-hash data layer in scope? | **Yes, at Phase 4.** | Coarse start/end geohash + time-of-day bucket. Cheap, and it is what makes auto-naming (F19), PB badges (F17) and "your fastest on this route" possible. Without it Phase 4 loses half its point. |
 
 **Migration discipline:** all new Isar fields land in **one** additive migration in Phase 4
@@ -96,17 +96,26 @@ both themes, both units, all three backdrops walked · logcat clean of overflows
 
 ### 2B — not started
 
-- [ ] 2.1 New `lib/core/ride_display_mode.dart` — `RideDisplayMode{dial, number, map, chart}`. Delete `record_view.dart` + `speed_gauge_style.dart`.
-      **⚠ Re-check before building.** The two enums are orthogonal: `RecordView{map,chart,none}`
-      × `SpeedGaugeStyle{digital,analog}` = **six** reachable states. A flat 4-way switcher
-      deletes three of them and makes the analog dial mutually exclusive with every backdrop
-      — including map + dial, which is what the phone is running today. F1's actual complaint
-      is that the control lives in Settings, which one inline control can fix without
-      collapsing the matrix.
-- [ ] 2.2 `SettingsService`: one `ride_display_mode.txt`, reading the two legacy pref files once for continuity, then writing the merged one.
-- [ ] 2.3 Inline switcher on the Record screen, persisted. Settings keeps a mirror row, reframed as "Default speed display".
-- [ ] 2.5 Chart mode becomes a real mode on the same grid, not a floating overlay — fixes the clipped title + overlapping chip (F8) properly.
-- [ ] 2.8 rest — layer/collapse folds into the switcher.
+**Approach chosen 2026-07-27: keep both axes** (see decision 2). `RecordView` and
+`SpeedGaugeStyle` both survive; no enum merge, no `ride_display_mode.dart`, no pref
+migration — the existing `record_view.txt` and `speed_gauge_style.txt` keep working, so
+nobody's saved preference is disturbed.
+
+- [ ] 2.1 Inline switcher on the Record screen, replacing the floating `_ViewToggleButton`:
+      a BACKDROP row (Map · Chart · Off) over a SPEED row (Dial · Number). Writes straight
+      through to `recordViewProvider` and `speedGaugeStyleProvider`, so persistence is
+      already done.
+- [ ] 2.2 Settings keeps both rows as a mirror, regrouped under "Default ride display" —
+      discoverability, not the only entry point (F1).
+- [ ] 2.3 Recenter becomes the only *floating* control, since the switcher is no longer one
+      (completes 2.8/F7).
+- [ ] 2.4 Chart mode laid out on the same grid as the sheet rather than behind it — replaces
+      2A's `Alignment(0, -0.55)` and `maxHeight * 0.40` stopgaps and fixes F8 properly.
+      The switcher gives the layout a real anchor to measure against.
+- [ ] 2.5 Off + Dial and Off + Number are newly reachable combinations that never had a
+      design — check the sheet still reads on the bare canvas in both.
+
+**Verify:** analyze · test · device, with every one of the six states walked in both themes.
 
 ---
 
