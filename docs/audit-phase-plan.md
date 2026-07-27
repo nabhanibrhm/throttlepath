@@ -94,28 +94,44 @@ see the note under 2.1).
 infos in `tool/` only) · 80 tests green · installed with `adb install -r`, ride DB intact ·
 both themes, both units, all three backdrops walked · logcat clean of overflows.
 
-### 2B — not started
+### 2B ✅ BUILT & DEVICE-VERIFIED (2026-07-27)
 
-**Approach chosen 2026-07-27: keep both axes** (see decision 2). `RecordView` and
-`SpeedGaugeStyle` both survive; no enum merge, no `ride_display_mode.dart`, no pref
-migration — the existing `record_view.txt` and `speed_gauge_style.txt` keep working, so
-nobody's saved preference is disturbed.
+**Approach: keep both axes** (see decision 2). `RecordView` and `SpeedGaugeStyle` both
+survive; no enum merge, no `ride_display_mode.dart`, **no pref migration** — the existing
+`record_view.txt` and `speed_gauge_style.txt` keep working, so no saved preference was
+disturbed.
 
-- [ ] 2.1 Inline switcher on the Record screen, replacing the floating `_ViewToggleButton`:
-      a BACKDROP row (Map · Chart · Off) over a SPEED row (Dial · Number). Writes straight
-      through to `recordViewProvider` and `speedGaugeStyleProvider`, so persistence is
-      already done.
-- [ ] 2.2 Settings keeps both rows as a mirror, regrouped under "Default ride display" —
-      discoverability, not the only entry point (F1).
-- [ ] 2.3 Recenter becomes the only *floating* control, since the switcher is no longer one
-      (completes 2.8/F7).
-- [ ] 2.4 Chart mode laid out on the same grid as the sheet rather than behind it — replaces
-      2A's `Alignment(0, -0.55)` and `maxHeight * 0.40` stopgaps and fixes F8 properly.
-      The switcher gives the layout a real anchor to measure against.
-- [ ] 2.5 Off + Dial and Off + Number are newly reachable combinations that never had a
-      design — check the sheet still reads on the bare canvas in both.
+- [x] 2.1 `lib/ui/ride_display_switcher.dart` — two segmented groups in one row (Map · Chart ·
+      Off | Dial · Number), inside the telemetry sheet under the drag handle. A dumb widget:
+      values in, callbacks out. Replaces the floating pill that *blind-cycled* map → chart →
+      off; tapping "Off" now selects Off instead of advancing from wherever you were.
+- [x] 2.2 Settings mirror regrouped under a **RIDE SCREEN** section (Backdrop · Live speed),
+      with Speed unit + Dark mode left under DISPLAY. Both surfaces read their text from
+      `RecordView.label` / `SpeedGaugeStyle.label`, so the wording cannot drift.
+      `SpeedGaugeStyle.label` changed "Digital"/"Analog" → "Number"/"Dial" — the rider is
+      picking a shape, not a technology, and the shorter words fit a segmented control.
+- [x] 2.3 Recenter is now the only floating control (F7 complete).
+- [x] 2.4 Both backdrops take a `bottomInset` of the sheet's **measured** height and lay out
+      in the strip above it, replacing 2A's `Alignment(0, -0.55)` and `maxHeight * 0.40`
+      guesses. `SafeArea(bottom: false)` — the sheet already covers that area and applies its
+      own inset. F8 fixed properly.
+- [x] 2.5 Off + Dial and Off + Number, newly reachable, both read correctly on bare canvas.
+      The "Show map" text link is gone: the switcher is always on screen, so Off is no longer
+      a state needing its own escape hatch.
+- [x] Camera re-centres when the sheet resizes. Dial → Number shortens the sheet ~110dp, and
+      the offset is only applied at `move()` time, so the rider's marker drifted off-centre
+      until the next fix. `_measureSheet` now re-issues the move.
 
-**Verify:** analyze · test · device, with every one of the six states walked in both themes.
+**Two follow-ons this created:**
+- `_measureSheet` had to start calling `setState` (2A deliberately avoided it). Safe: the
+  sheet sizes itself from its own content, never from `_sheetHeight`, so the `!=` guard
+  terminates after one extra frame.
+- `ExcludeSemantics` around each segment's `Text`, so TalkBack announces "Backdrop: Chart"
+  once rather than that plus a bare "Chart".
+
+**Verified:** analyze clean in `lib/` + `test/` · 88 tests green (8 new in
+`test/ride_display_switcher_test.dart`, incl. a guard that fails if anyone re-flattens the
+enums) · all **six** combinations walked on device, both themes · logcat clean.
 
 ---
 

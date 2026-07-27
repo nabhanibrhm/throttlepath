@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'dart:ui' show ImageFilter;
 
 import 'package:fl_chart/fl_chart.dart';
@@ -19,6 +18,7 @@ import '../providers/tracking_providers.dart';
 import '../services/permission_service.dart';
 import '../theme/app_theme.dart';
 import 'analog_speed_gauge.dart';
+import 'ride_display_switcher.dart';
 import 'ride_summary_screen.dart';
 import 'live_speed_chart.dart';
 
@@ -68,26 +68,39 @@ class _TrackingMapScreenState extends ConsumerState<TrackingMapScreen> {
   /// which is harmless — that's the old behaviour.
   Offset get _cameraOffset => Offset(0, -_sheetHeight / 2);
 
-  /// Reads the sheet's laid-out height. Deliberately not `setState` — this only
-  /// feeds camera maths, and rebuilding here would loop.
+  /// Reads the sheet's laid-out height. Rebuilds when it changes, because the
+  /// backdrops now lay themselves out in the strip above the sheet rather than
+  /// guessing at an alignment. Safe from looping: the sheet sizes itself from
+  /// its own content and never from this value, so the next measurement matches
+  /// and the `!=` guard stops there.
   void _measureSheet() {
     final box = _sheetKey.currentContext?.findRenderObject() as RenderBox?;
-    if (box != null && box.hasSize) _sheetHeight = box.size.height;
+    if (box == null || !box.hasSize) return;
+    final height = box.size.height;
+    if (height == _sheetHeight || !mounted) return;
+    setState(() => _sheetHeight = height);
+    // The visible strip just changed size — switching Dial to Number shortens
+    // the sheet by ~110dp — so whatever was centred in it no longer is. Re-issue
+    // the move with the new offset. No loop: the sheet's height comes from its
+    // own content, never from the camera.
+    if (_mapReady && ref.read(recordViewProvider) == RecordView.map) {
+      final target = _currentLatLng(ref.read(trackingControllerProvider));
+      if (target != null) _moveCamera(target, _mapController.camera.zoom);
+    }
   }
 
   /// Centres the camera on [target] in the visible strip above the sheet.
   void _moveCamera(LatLng target, double zoom) =>
       _mapController.move(target, zoom, offset: _cameraOffset);
 
-  /// Advances the backdrop view map → chart → none → map (the choice is
-  /// persisted via [recordViewProvider]). Leaving the map tears down the
-  /// FlutterMap widget, so its controller detaches — reset [_mapReady].
-  void _cycleView() {
-    final next = ref.read(recordViewProvider).next;
+  /// Switches the backdrop (the choice is persisted via [recordViewProvider]).
+  /// Leaving the map tears down the FlutterMap widget, so its controller
+  /// detaches — reset [_mapReady].
+  void _setView(RecordView next) {
     if (next != RecordView.map) {
       setState(() => _mapReady = false);
     }
-    ref.read(recordViewProvider.notifier).cycle();
+    ref.read(recordViewProvider.notifier).set(next);
   }
 
   /// Fetches the current position, centers the map on it, and drops the idle
@@ -237,10 +250,16 @@ class _TrackingMapScreenState extends ConsumerState<TrackingMapScreen> {
               ],
             )
           else if (view == RecordView.chart)
-            Positioned.fill(child: _ChartBackdrop(state: state, unit: unit))
+            Positioned.fill(
+              child: _ChartBackdrop(
+                state: state,
+                unit: unit,
+                bottomInset: _sheetHeight,
+              ),
+            )
           else
             Positioned.fill(
-              child: _StatsBackdrop(state: state, onShowMap: _cycleView),
+              child: _StatsBackdrop(state: state, bottomInset: _sheetHeight),
             ),
           if (view == RecordView.map) const _MapAttribution(),
           // Pending trip continuation: a top banner naming the trip this next
@@ -271,28 +290,28 @@ class _TrackingMapScreenState extends ConsumerState<TrackingMapScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // View-cycle (left) + recenter (right) float just above the
-                // sheet while the map or chart is on screen. In the hidden
-                // state the backdrop carries its own centered "Show map" pill.
-                if (view != RecordView.none)
+                // Recenter is now the *only* floating control (F7): the backdrop
+                // switcher moved into the sheet, so nothing else competes with
+                // it for the same visual language.
+                if (view == RecordView.map)
                   Padding(
                     padding:
                         const EdgeInsets.only(left: 16, right: 16, bottom: 12),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        _ViewToggleButton(view: view, onTap: _cycleView),
-                        if (view == RecordView.map)
-                          _LocateButton(busy: _locating, onTap: _locateMe),
-                      ],
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: _LocateButton(busy: _locating, onTap: _locateMe),
                     ),
                   ),
                 _TelemetrySheet(
                   key: _sheetKey,
                   state: state,
                   unit: unit,
+                  view: view,
                   gaugeStyle: gaugeStyle,
                   accuracyMeters: _lastAccuracyMeters,
+                  onViewChanged: _setView,
+                  onGaugeStyleChanged: (style) =>
+                      ref.read(speedGaugeStyleProvider.notifier).set(style),
                   onStart: () =>
                       ref.read(trackingControllerProvider.notifier).start(),
                   onStop: () =>
@@ -610,153 +629,94 @@ class _LocateButton extends StatelessWidget {
   }
 }
 
-/// Glass pill that cycles the backdrop view (map → chart → none). Shows the
-/// current view's icon + label; tapping advances to the next.
-///
-/// Rendered in neutral ink rather than amber (F7): it and the recenter button
-/// used to carry the identical amber outline, so neither read as more important
-/// than the other. Recenter is the action, this is a mode indicator — recenter
-/// keeps the accent.
-class _ViewToggleButton extends StatelessWidget {
-  const _ViewToggleButton({required this.view, required this.onTap});
-
-  final RecordView view;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final cx = AppColors.of(context);
-    final (IconData icon, String label, String next) = switch (view) {
-      RecordView.map => (Icons.map, 'Map', 'the live chart'),
-      RecordView.chart => (Icons.show_chart, 'Chart', 'no backdrop'),
-      RecordView.none => (Icons.visibility_off_outlined, 'Hidden', 'the map'),
-    };
-    return Semantics(
-      button: true,
-      label: 'Backdrop: $label. Switch to $next.',
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-          child: Material(
-            color: cx.surface.withValues(alpha: 0.72),
-            child: InkWell(
-              onTap: onTap,
-              child: Container(
-                height: 52,
-                padding: const EdgeInsets.symmetric(horizontal: 18),
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: cx.border),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(icon, color: cx.textBright, size: 20),
-                    const SizedBox(width: 8),
-                    Text(label,
-                        style: TextStyle(
-                            color: cx.textBright,
-                            fontWeight: FontWeight.w600)),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 /// Backdrop shown when the view is [RecordView.chart]: a live speed-vs-distance
 /// line chart built from the ride's accumulated samples. Draws no tiles/blur,
 /// so — like [_StatsBackdrop] — the GPU stays idle. Shows a branded empty-state
 /// until there are enough samples to plot.
 class _ChartBackdrop extends StatelessWidget {
-  const _ChartBackdrop({required this.state, required this.unit});
+  const _ChartBackdrop({
+    required this.state,
+    required this.unit,
+    required this.bottomInset,
+  });
 
   final TrackingUiState state;
   final SpeedUnit unit;
+
+  /// Measured height of the telemetry sheet covering the bottom of the stack.
+  ///
+  /// The chart used to be a floating overlay sized at a guessed fraction of the
+  /// screen, which ran its x-axis underneath the sheet and hid the empty state's
+  /// caption entirely (F8). Reserving the sheet's real height puts the chart on
+  /// the same grid: it fills exactly the strip that is on screen.
+  final double bottomInset;
 
   @override
   Widget build(BuildContext context) {
     final cx = AppColors.of(context);
     final samples = state.speedSamples;
 
-    if (samples.length < 2) {
-      return Container(
-        color: cx.canvas,
-        child: SafeArea(
-          child: Align(
-            // Upper third, matching [_StatsBackdrop]: a centred block puts its
-            // own caption behind the telemetry sheet, which is what left this
-            // state showing a lone floating icon.
-            alignment: const Alignment(0, -0.55),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.show_chart, size: 40, color: cx.textTertiary),
-                const SizedBox(height: 14),
-                Text(
-                  'Speed / distance',
-                  style: TextStyle(
-                    color: cx.textBright,
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 48),
-                  child: Text(
-                    state.phase == 'recording'
-                        ? 'Charting your speed as you cover distance…'
-                        : 'Your live speed vs. distance chart appears here as you ride.',
-                    textAlign: TextAlign.center,
-                    style:
-                        TextStyle(color: cx.textDim, fontSize: 13, height: 1.5),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
-    final spots = [
-      for (final s in samples)
-        FlSpot(s.distanceMeters / 1000.0, s.speedKmh),
-    ];
     return Container(
       color: cx.canvas,
+      // Bottom inset comes from the sheet, which already covers that area and
+      // applies its own SafeArea — taking it twice would leave a dead band.
       child: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, c) {
-            // Keep the live chart compact and anchored near the top so both the
-            // SPEED (y) and DISTANCE (x) axes stay fully visible above the
-            // telemetry sheet — a full-bleed chart hides the x-axis behind it.
-            // 0.5 still ran the x-axis under the sheet, which is roughly the
-            // bottom 44% of the stack. Phase 2.5 replaces this guess by laying
-            // the chart out on the same grid as the sheet instead of behind it.
-            final h = math.min(300.0, c.maxHeight * 0.40);
-            return Align(
-              alignment: Alignment.topCenter,
-              child: Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: SizedBox(
-                  height: h,
+        bottom: false,
+        child: Padding(
+          padding: EdgeInsets.only(bottom: bottomInset),
+          child: samples.length < 2
+              ? _EmptyChart(recording: state.phase == 'recording')
+              : Padding(
+                  padding: const EdgeInsets.fromLTRB(4, 16, 16, 8),
                   child: LiveSpeedChart(
-                    spots: spots,
+                    spots: [
+                      for (final s in samples)
+                        FlSpot(s.distanceMeters / 1000.0, s.speedKmh),
+                    ],
                     unit: unit,
                   ),
                 ),
-              ),
-            );
-          },
         ),
+      ),
+    );
+  }
+}
+
+/// Shown until there are two samples to draw a line between.
+class _EmptyChart extends StatelessWidget {
+  const _EmptyChart({required this.recording});
+
+  final bool recording;
+
+  @override
+  Widget build(BuildContext context) {
+    final cx = AppColors.of(context);
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.show_chart, size: 40, color: cx.textTertiary),
+          const SizedBox(height: 14),
+          Text(
+            'Speed / distance',
+            style: TextStyle(
+              color: cx.textBright,
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 48),
+            child: Text(
+              recording
+                  ? 'Charting your speed as you cover distance…'
+                  : 'Your live speed vs. distance chart appears here as you ride.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: cx.textDim, fontSize: 13, height: 1.5),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -774,10 +734,12 @@ class _ChartBackdrop extends StatelessWidget {
 /// The rider's actual pre-ride context lives in the sheet ([_IdleContext]), where
 /// it shows in every backdrop rather than only this one.
 class _StatsBackdrop extends StatelessWidget {
-  const _StatsBackdrop({required this.state, required this.onShowMap});
+  const _StatsBackdrop({required this.state, required this.bottomInset});
 
   final TrackingUiState state;
-  final VoidCallback onShowMap;
+
+  /// Measured height of the telemetry sheet — see [_ChartBackdrop.bottomInset].
+  final double bottomInset;
 
   @override
   Widget build(BuildContext context) {
@@ -786,72 +748,60 @@ class _StatsBackdrop extends StatelessWidget {
     return Container(
       color: cx.canvas,
       child: SafeArea(
-        child: Align(
-          // Upper third: everything below it belongs to the telemetry sheet,
-          // which overlaps a centred block on a short screen.
-          alignment: const Alignment(0, -0.55),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Image.asset(
-                    'assets/icon/logo_foreground.png',
-                    width: 26,
-                    height: 26,
-                    color: cx.textTertiary,
-                    filterQuality: FilterQuality.medium,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'ThrottlePath',
-                    style: TextStyle(
-                      color: cx.textTertiary,
-                      fontSize: 15,
-                      letterSpacing: 0.5,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 26),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 32),
-                child: Row(
+        bottom: false,
+        child: Padding(
+          padding: EdgeInsets.only(bottom: bottomInset),
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.visibility_off_outlined,
-                        size: 15, color: cx.textDim),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        recording
-                            ? 'Map hidden — recording in the background'
-                            : 'Map hidden to save battery',
-                        style: TextStyle(color: cx.textDim, fontSize: 13),
-                      ),
+                    Image.asset(
+                      'assets/icon/logo_foreground.png',
+                      width: 26,
+                      height: 26,
+                      color: cx.textTertiary,
+                      filterQuality: FilterQuality.medium,
                     ),
-                    // A link, not a button: the one filled control on this
-                    // screen is START RIDE, and nothing else may compete with it.
-                    TextButton(
-                      onPressed: onShowMap,
-                      style: TextButton.styleFrom(
-                        foregroundColor: cx.accentInk,
-                        // Visually a link, but still a full 48dp touch target.
-                        minimumSize: const Size(0, 48),
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                      ),
-                      child: const Text(
-                        'Show map',
-                        style: TextStyle(
-                            fontSize: 13, fontWeight: FontWeight.w700),
+                    const SizedBox(width: 8),
+                    Text(
+                      'ThrottlePath',
+                      style: TextStyle(
+                        color: cx.textTertiary,
+                        fontSize: 15,
+                        letterSpacing: 0.5,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                   ],
                 ),
-              ),
-            ],
+                const SizedBox(height: 20),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.visibility_off_outlined,
+                          size: 15, color: cx.textDim),
+                      const SizedBox(width: 8),
+                      // No "Show map" link any more: the switcher in the sheet
+                      // is always on screen, so this state is no longer a place
+                      // the rider can get stuck in and need an escape hatch from.
+                      Flexible(
+                        child: Text(
+                          recording
+                              ? 'Map hidden — recording in the background'
+                              : 'Map hidden to save battery',
+                          style: TextStyle(color: cx.textDim, fontSize: 13),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -866,8 +816,11 @@ class _TelemetrySheet extends StatelessWidget {
     super.key,
     required this.state,
     required this.unit,
+    required this.view,
     required this.gaugeStyle,
     required this.accuracyMeters,
+    required this.onViewChanged,
+    required this.onGaugeStyleChanged,
     required this.onStart,
     required this.onStop,
     required this.onPause,
@@ -876,11 +829,15 @@ class _TelemetrySheet extends StatelessWidget {
 
   final TrackingUiState state;
   final SpeedUnit unit;
+  final RecordView view;
   final SpeedGaugeStyle gaugeStyle;
 
   /// Accuracy of the latest fix, for the idle readiness row. Null until the
   /// rider has located themselves this session.
   final double? accuracyMeters;
+
+  final ValueChanged<RecordView> onViewChanged;
+  final ValueChanged<SpeedGaugeStyle> onGaugeStyleChanged;
   final VoidCallback onStart;
   final VoidCallback onStop;
   final VoidCallback onPause;
@@ -935,6 +892,16 @@ class _TelemetrySheet extends StatelessWidget {
                 color: cx.border,
                 borderRadius: BorderRadius.circular(2),
               ),
+            ),
+            const SizedBox(height: 12),
+            // The display control sits above the readout it governs and stays
+            // on screen in every backdrop, which is the whole of F1: it used to
+            // be a blind-cycling pill plus a Settings row three taps away.
+            RideDisplaySwitcher(
+              view: view,
+              gaugeStyle: gaugeStyle,
+              onViewChanged: onViewChanged,
+              onGaugeStyleChanged: onGaugeStyleChanged,
             ),
             const SizedBox(height: 16),
             // Hero: the acquiring pill, or the big speed/countdown number.

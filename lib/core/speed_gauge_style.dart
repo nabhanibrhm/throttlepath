@@ -21,10 +21,13 @@ enum SpeedGaugeStyle {
         _ => SpeedGaugeStyle.digital,
       };
 
-  /// Human label for the Settings row.
+  /// Human label, shared by the Record-screen switcher and its Settings mirror.
+  ///
+  /// "Dial" / "Number" rather than "Analog" / "Digital": the rider is picking a
+  /// shape, not a technology, and the shorter words fit a segmented control.
   String get label => switch (this) {
-        SpeedGaugeStyle.digital => 'Digital',
-        SpeedGaugeStyle.analog => 'Analog',
+        SpeedGaugeStyle.digital => 'Number',
+        SpeedGaugeStyle.analog => 'Dial',
       };
 
   /// The other style — the Settings row is a straight toggle.

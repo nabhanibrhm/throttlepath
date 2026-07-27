@@ -19,6 +19,14 @@ enum RecordView {
         RecordView.none => 'none',
       };
 
+  /// Human label, shared by the Record-screen switcher and its Settings mirror
+  /// so the two can never drift apart.
+  String get label => switch (this) {
+        RecordView.map => 'Map',
+        RecordView.chart => 'Chart',
+        RecordView.none => 'Off',
+      };
+
   static RecordView fromTag(String? tag) => switch (tag) {
         'map' => RecordView.map,
         'chart' => RecordView.chart,

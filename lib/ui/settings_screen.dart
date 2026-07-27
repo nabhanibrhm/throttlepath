@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/record_view.dart';
 import '../core/speed_gauge_style.dart';
 import '../providers/history_providers.dart';
 import '../providers/settings_providers.dart';
@@ -20,6 +21,7 @@ class SettingsScreen extends ConsumerWidget {
     final cx = AppColors.of(context);
     final isDark = ref.watch(themeModeProvider) == ThemeMode.dark;
     final unit = ref.watch(speedUnitProvider);
+    final view = ref.watch(recordViewProvider);
     final gaugeStyle = ref.watch(speedGaugeStyleProvider);
 
     return Scaffold(
@@ -50,18 +52,6 @@ class SettingsScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 12),
           _SettingsTile(
-            icon: gaugeStyle == SpeedGaugeStyle.analog
-                ? Icons.donut_large
-                : Icons.pin_outlined,
-            title: 'Live speed',
-            trailing: Text(
-              gaugeStyle.label,
-              style: TextStyle(color: cx.textDim, fontSize: 13),
-            ),
-            onTap: () => ref.read(speedGaugeStyleProvider.notifier).toggle(),
-          ),
-          const SizedBox(height: 12),
-          _SettingsTile(
             icon: isDark ? Icons.dark_mode : Icons.light_mode,
             title: 'Dark mode',
             trailing: Switch(
@@ -71,6 +61,36 @@ class SettingsScreen extends ConsumerWidget {
               onChanged: (_) => ref.read(themeModeProvider.notifier).toggle(),
             ),
             onTap: () => ref.read(themeModeProvider.notifier).toggle(),
+          ),
+          const SizedBox(height: 24),
+          // A mirror of the Record screen's own switcher, not the only way in
+          // (F1). Both surfaces read their labels off the same enums, so the
+          // wording here can never drift from the chips there.
+          _SectionLabel('Ride screen'),
+          _SettingsTile(
+            icon: switch (view) {
+              RecordView.map => Icons.map_outlined,
+              RecordView.chart => Icons.show_chart,
+              RecordView.none => Icons.visibility_off_outlined,
+            },
+            title: 'Backdrop',
+            trailing: Text(
+              view.label,
+              style: TextStyle(color: cx.textDim, fontSize: 13),
+            ),
+            onTap: () => ref.read(recordViewProvider.notifier).cycle(),
+          ),
+          const SizedBox(height: 12),
+          _SettingsTile(
+            icon: gaugeStyle == SpeedGaugeStyle.analog
+                ? Icons.donut_large
+                : Icons.pin_outlined,
+            title: 'Live speed',
+            trailing: Text(
+              gaugeStyle.label,
+              style: TextStyle(color: cx.textDim, fontSize: 13),
+            ),
+            onTap: () => ref.read(speedGaugeStyleProvider.notifier).toggle(),
           ),
           const SizedBox(height: 24),
           _SectionLabel('Data'),
