@@ -15,6 +15,8 @@ Future<void> main() async {
   final unit = await SettingsService.instance.loadSpeedUnit();
   final recordView = await SettingsService.instance.loadRecordView();
   final gaugeStyle = await SettingsService.instance.loadSpeedGaugeStyle();
+  final countdown = await SettingsService.instance.loadCountdownEnabled();
+  final keepScreenOn = await SettingsService.instance.loadKeepScreenOn();
   runApp(
     ProviderScope(
       overrides: [
@@ -24,6 +26,10 @@ Future<void> main() async {
             .overrideWith((ref) => RecordViewController(recordView)),
         speedGaugeStyleProvider
             .overrideWith((ref) => SpeedGaugeStyleController(gaugeStyle)),
+        countdownEnabledProvider
+            .overrideWith((ref) => CountdownEnabledController(countdown)),
+        keepScreenOnProvider
+            .overrideWith((ref) => KeepScreenOnController(keepScreenOn)),
       ],
       child: const ThrottlePathApp(),
     ),

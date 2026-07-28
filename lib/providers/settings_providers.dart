@@ -93,3 +93,47 @@ final speedGaugeStyleProvider =
     StateNotifierProvider<SpeedGaugeStyleController, SpeedGaugeStyle>(
   (ref) => SpeedGaugeStyleController(SpeedGaugeStyle.digital),
 );
+
+/// Holds the "3… 2… 1… countdown before the clock starts" preference.
+///
+/// The recording engine reads the same pref straight off disk in its own
+/// isolate, so this provider drives the Settings row only — it is not the path
+/// by which the engine learns the value.
+class CountdownEnabledController extends StateNotifier<bool> {
+  CountdownEnabledController(super.state);
+
+  Future<void> set(bool enabled) async {
+    if (enabled == state) return;
+    state = enabled;
+    await SettingsService.instance.saveCountdownEnabled(enabled);
+  }
+
+  Future<void> toggle() => set(!state);
+}
+
+/// Whether the pre-ride countdown runs. Off by default (F10). Seeded in
+/// `main()` (via override) with the persisted value.
+final countdownEnabledProvider =
+    StateNotifierProvider<CountdownEnabledController, bool>(
+  (ref) => CountdownEnabledController(false),
+);
+
+/// Holds the "keep the screen on while recording" preference.
+class KeepScreenOnController extends StateNotifier<bool> {
+  KeepScreenOnController(super.state);
+
+  Future<void> set(bool enabled) async {
+    if (enabled == state) return;
+    state = enabled;
+    await SettingsService.instance.saveKeepScreenOn(enabled);
+  }
+
+  Future<void> toggle() => set(!state);
+}
+
+/// Whether a recording ride holds the screen awake. Off by default. Seeded in
+/// `main()` (via override) with the persisted value.
+final keepScreenOnProvider =
+    StateNotifierProvider<KeepScreenOnController, bool>(
+  (ref) => KeepScreenOnController(false),
+);

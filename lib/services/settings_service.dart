@@ -21,6 +21,8 @@ class SettingsService {
   static const _speedUnitFileName = 'speed_unit.txt';
   static const _recordViewFileName = 'record_view.txt';
   static const _speedGaugeStyleFileName = 'speed_gauge_style.txt';
+  static const _countdownFileName = 'countdown_enabled.txt';
+  static const _keepScreenOnFileName = 'keep_screen_on.txt';
 
   File? _file;
 
@@ -122,6 +124,49 @@ class SettingsService {
     try {
       final f = await _resolveNamed(_speedGaugeStyleFileName);
       await f.writeAsString(style.tag);
+    } catch (_) {
+      // best-effort; the choice still applies for this session
+    }
+  }
+
+  /// Whether to run the "3… 2… 1…" countdown before the ride clock starts.
+  /// **Defaults to off** — it delights once and taxes every ride after that, and
+  /// a commuter starts ten rides a week. Opt in from Settings.
+  ///
+  /// Also read from the *background isolate* (which has its own copy of this
+  /// singleton), so the engine never has to wait on a message from the UI to
+  /// know whether to count down.
+  Future<bool> loadCountdownEnabled() => _loadFlag(_countdownFileName);
+
+  /// Persists the countdown preference. Best-effort.
+  Future<void> saveCountdownEnabled(bool enabled) =>
+      _saveFlag(_countdownFileName, enabled);
+
+  /// Whether to hold the screen awake while a ride is recording. Defaults to
+  /// off: recording itself doesn't need the screen (the foreground service keeps
+  /// the CPU alive), so leaving it on is a battery cost the rider should choose.
+  Future<bool> loadKeepScreenOn() => _loadFlag(_keepScreenOnFileName);
+
+  /// Persists the keep-screen-on preference. Best-effort.
+  Future<void> saveKeepScreenOn(bool enabled) =>
+      _saveFlag(_keepScreenOnFileName, enabled);
+
+  /// Shared reader for the boolean prefs. Absent file or unreadable value reads
+  /// as false, so every flag defaults to off.
+  Future<bool> _loadFlag(String name) async {
+    try {
+      final f = await _resolveNamed(name);
+      if (!await f.exists()) return false;
+      return (await f.readAsString()).trim() == '1';
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _saveFlag(String name, bool value) async {
+    try {
+      final f = await _resolveNamed(name);
+      await f.writeAsString(value ? '1' : '0');
     } catch (_) {
       // best-effort; the choice still applies for this session
     }

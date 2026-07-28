@@ -135,18 +135,105 @@ enums) · all **six** combinations walked on device, both themes · logcat clean
 
 ---
 
-## Phase 3 — Recording lifecycle & mis-tap safety
+## Phase 3 — Recording lifecycle & mis-tap safety ✅ BUILT & DEVICE-VERIFIED
 *fixes F10, F11, F12, F14 · part of F13 · ~1 week*
 
-- [ ] 3.1 Glance hierarchy (F14): speed 64sp hero · distance + elapsed 27sp on one line · avg/peak/moving collapsed to one 12sp reference row.
-- [ ] 3.2 Pause becomes the **wide primary**; Stop narrows and moves to the far edge (F11). Hold requirement printed *on* the button, not in 10sp grey below it.
-- [ ] 3.3 `HapticFeedback` at 50% and on completion of the 2.2s hold (no new dep — currently zero haptics in the repo). Release-early cancels with a "still recording" toast.
-- [ ] 3.4 Unmistakable paused state (F12): striped amber rail, desaturated stats, `ELAPSED · FROZEN`, "Not recording — paused 1:27 ago", Resume as wide primary, Stop relabels to **Finish ride**.
-- [ ] 3.5 Countdown off by default, opt-in in Settings, tap-to-skip while running (F10).
-- [ ] 3.6 Keep-screen-on toggle → **new dep `wakelock_plus`**.
-- [ ] 3.7 *(stretch)* tap-to-lock control in the recording bar.
+- [x] 3.1 Glance hierarchy (F14): speed hero 60→**64sp** · distance + elapsed promoted to a
+      two-up **27sp** row (`_HeroStat`) · avg/peak/moving collapsed into one 12sp
+      `_ReferenceStats` line. The old 4-up `_Metric` grid put all four at the same 20sp,
+      which is no hierarchy at all; `_Metric` is deleted.
+- [x] 3.2 Pause is the **wide primary** (flex 2:1, and 3:2 once paused so `RESUME` keeps the
+      weight); hold-to-end is narrow and at the far edge. The requirement is printed **on**
+      the button (`STOP` / `HOLD 2.2s`) instead of in grey text below it, and mid-hold that
+      sub-label becomes the live countdown. New `_RideControls` owns the bar.
+- [x] 3.3 `HapticFeedback` at the halfway latch (`lightImpact`) and on completion
+      (`heavyImpact`) — the repo had zero haptics before. Releasing early **cancels
+      outright** (snaps the fill to zero rather than animating back, so a cancelled hold
+      can't be misread as one in progress) and toasts "Still recording".
+      *Beyond the plan:* `mediumImpact` on Pause/Resume too — a gloved thumb gets no
+      travel and no click, so haptic is the only confirmation the tap landed.
+- [x] 3.4 Unmistakable paused state (F12): full-width **striped amber rail** across the top
+      of the sheet (`_StripedRail`, outside the horizontal padding), **filled** `PAUSED`
+      chip instead of the old small outlined badge, stats desaturated to `textDim`,
+      `ELAPSED · FROZEN` on the label, "Not recording — paused 1:27 ago" in words, and
+      Stop relabelled **FINISH RIDE** — the destructive verb only appears when ending the
+      ride is actually what the rider wants.
+- [x] 3.5 Countdown **off by default**, opt-in under a new Settings **RECORDING** section,
+      and the counting-down number itself is the skip target (pill reads `TAP TO SKIP`).
+- [x] 3.6 Keep-screen-on toggle → **new dep `wakelock_plus` 1.7.0** (resolved and compiled
+      clean). Off by default; held for the whole ride including pauses, released on stop.
+- [ ] 3.7 *(stretch)* tap-to-lock control in the recording bar. **Not done** — a
+      touch-swallowing overlay is a feature, not a fix, and F13's lock is the part of that
+      finding with no BLOCKER behind it.
 
-**Verify:** analyze · test · **device pass needs a real ride** (pause/resume accounting must stay correct).
+### Two things worth knowing
+
+**A second freeze already existed, and the screen never admitted it.** The engine's
+signal-loss auto-pause (`signalLostAt`) freezes the ride clock exactly as a manual pause
+does, but nothing on screen said so — a stalled clock with no explanation reads as a bug.
+`signalLost` now crosses to the UI alongside `pausedAtMs`, and the same frozen treatment
+covers it with its own wording (`GPS SIGNAL LOST` / "Not recording — waiting for GPS").
+Kept **amber, not red**, to stay inside Phase 1's red discipline. This is an addition to
+the plan, not something the audit asked for — say the word and it comes out.
+
+**Turning the countdown off exposed a latent double-start race.** `beginRecording()`
+deliberately leaves `phase` alone until the `Ride` row exists ("so an in-flight fix can't
+persist against rideId 0"), and the `'countdown'` phase used to cover that window
+synchronously. With the countdown off, GPS lock calls straight through, so `phase` stayed
+`'acquiring'` across the `await db.saveRide()` — a second fix landing in that window would
+have started **a second ride row**. Guarded with a `beginningRecording` latch released in a
+`finally`, so a failed save can still be retried instead of wedging the ride in `acquiring`
+with its timeout already spent.
+
+### One regression this created, caught only on device
+
+**The acquiring screen showed four zeros again.** `hasTelemetry` was `tracking || lastFinished`,
+so during `'acquiring'` and `'countdown'` — when no ride exists yet — the stats block rendered
+`0.00 km / 00:00 / AVG 0.0 / PEAK 0.0`. That is exactly the F5 problem 2A removed from the idle
+screen, and 3.1 made it twice as loud by promoting two of those zeros to 27sp. Now keyed on
+`recording || lastFinished` (`'recording'` covers paused, since pausing doesn't change the
+phase), so acquiring falls through to the GPS-readiness row — the honest content for that
+moment. **Screenshot the pre-ride phases, not just the riding one.**
+
+**Verify:** `flutter analyze` clean in `lib/` + `test/` ✅ · **99 tests green** ✅ (11 new in
+`test/recording_lifecycle_test.dart`) · `flutter build apk --debug` succeeds with the new dep ✅ ·
+`adb install -r` over the existing debug build, ride DB intact ✅.
+
+**Device pass done 2026-07-28** (ASUS X01BDA, three throwaway rides, all discarded; History and
+the Jul 25–28 trips verified untouched afterwards). Walked in **both themes**: acquiring (GPS
+readiness, no zeros), recording, paused, and the finished summary. Confirmed on device —
+striped rail spanning edge to edge under the rounded corners · filled PAUSED chip ·
+"Not recording — paused 13s ago" **ticking live** off `pausedAtMs` (so the isolate plumbing
+works) · `ELAPSED · FROZEN` with values dropped to `textDim` · PAUSE wide / STOP narrow with
+`HOLD 2.2s` **on** the button and no grey hint line at rest · release-early cancel toasting
+"Still recording — keep holding to end the ride." with the ride still running · completing
+hold finalising the ride · countdown **off** by default going straight from GPS lock to
+recording · Settings RECORDING section with both toggles off and the countdown subtitle
+switching with its state. Logcat clean — zero `RenderFlex` overflows, zero Dart exceptions.
+
+**Two things not visually confirmed:** the countdown's own 3-2-1 rendering (`TAP TO SKIP` pill)
+was never captured — it is a 3-second window and each `adb` round-trip costs ~1s. Tap-to-skip
+itself is evidenced indirectly: with the countdown *enabled*, recording began at `ELAPSED 00:01`
+with zero countdown frames across 16 captures while tapping the hero each iteration. And the
+**haptics could not be verified over adb at all** — worth a deliberate check by hand.
+
+**Still wants a real ride.** Everything above was stationary indoors: moving time stayed
+`00:00` and distance never exceeded 0.02 km, so pause/resume accounting is only shown to be
+*self-consistent*, not correct against real movement. The GPS-blackout rail has never been
+seen in the wild either.
+
+**Decided 2026-07-28 — `FINISH RIDE` keeps the `danger` red.** Raised as a judgement call (the
+relabel from STOP softens the wording, so keeping the same red only half-does it) and settled in
+favour of red: ending a ride is terminal, and red + hold is the mis-tap protection. This is a
+sanctioned exception to Phase 1's red discipline, alongside Stop / Discard / Delete / error text
+— **don't "fix" it in a later phase.**
+
+**Known pre-existing logcat noise, not Phase 3:** `flutter_background_service_android` logs
+"This class should only be used in the main isolate" — its own `registerWith()` throws when
+`DartPluginRegistrant.ensureInitialized()` registers it inside the background isolate. Caught
+and logged by Flutter's registrant; harmless, since the isolate uses `ServiceInstance`. The
+`geocoding` plugin's `Geocoder$GeocodeListener` `ClassNotFoundException` is likewise an API-33
+class missing on this API-28 device, with a sync fallback.
 
 ---
 

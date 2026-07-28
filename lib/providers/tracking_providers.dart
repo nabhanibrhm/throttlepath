@@ -197,6 +197,11 @@ class TrackingController extends StateNotifier<TrackingUiState> {
     state = state.copyWith(isPaused: false);
   }
 
+  /// Cuts a running pre-ride countdown short. Not applied optimistically — the
+  /// engine owns the phase transition, and it is the thing that creates the Ride
+  /// row, so the UI waits for it to say recording has begun.
+  void skipCountdown() => _service.skipCountdown();
+
   /// Standalone save — names the just-finished ride (already persisted), with no
   /// trip link, and returns to idle so the next ride starts fresh.
   Future<void> saveFinishedRide(String name) async {

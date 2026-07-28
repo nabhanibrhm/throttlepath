@@ -9,6 +9,7 @@ import '../data/database_service.dart';
 import '../data/models/ride.dart';
 import '../data/models/track_point.dart';
 import 'location_source.dart';
+import 'settings_service.dart';
 
 /// Foreground-service notification id (arbitrary, stable across the app).
 const int _kNotificationId = 888;
@@ -111,6 +112,8 @@ class LiveTelemetry {
     this.lon,
     this.phase = 'recording',
     this.countdown = 0,
+    this.pausedAtMs,
+    this.signalLost = false,
   });
 
   final int rideId;
@@ -141,6 +144,27 @@ class LiveTelemetry {
   /// Remaining countdown seconds while [phase] == 'countdown' (0 otherwise).
   final int countdown;
 
+  /// When the current pause began, as epoch milliseconds; null unless [paused].
+  /// The engine owns this rather than the UI so "paused 1:27 ago" stays true
+  /// across a UI rebuild — and it comes back correct if the rider returns to the
+  /// app long after pausing.
+  final int? pausedAtMs;
+
+  /// True while GPS has been silent long enough to count as a blackout
+  /// (tunnel / train). The ride clock is frozen exactly as it is by a manual
+  /// pause, so the screen has to be able to say so — otherwise the rider reads
+  /// a stalled clock as a bug.
+  final bool signalLost;
+
+  /// How long the ride has been paused, or null when it isn't.
+  Duration? get pausedFor {
+    final ms = pausedAtMs;
+    if (!paused || ms == null) return null;
+    final d = DateTime.now()
+        .difference(DateTime.fromMillisecondsSinceEpoch(ms));
+    return d.isNegative ? Duration.zero : d;
+  }
+
   /// Values cross an isolate boundary as JSON, so numbers may arrive as int or
   /// double — normalise via `num`.
   factory LiveTelemetry.fromMap(Map<String, dynamic> m) => LiveTelemetry(
@@ -159,6 +183,8 @@ class LiveTelemetry {
         lon: (m['lon'] as num?)?.toDouble(),
         phase: (m['phase'] as String?) ?? 'recording',
         countdown: (m['countdown'] as num?)?.toInt() ?? 0,
+        pausedAtMs: (m['pausedAtMs'] as num?)?.toInt(),
+        signalLost: (m['signalLost'] as bool?) ?? false,
       );
 }
 
@@ -211,6 +237,10 @@ class TrackingService {
   /// Resumes a paused recording.
   void resumeRide() => _service.invoke('resume');
 
+  /// Cuts the pre-ride countdown short and starts recording now. No-op unless a
+  /// countdown is actually running.
+  void skipCountdown() => _service.invoke('skipCountdown');
+
   /// Per-fix live telemetry while recording.
   Stream<LiveTelemetry> get telemetry => _service
       .on('telemetry')
@@ -255,6 +285,12 @@ Future<void> onStart(ServiceInstance service) async {
 
   // The app records with raw GNSS (the committed pipeline — see location_source).
   final locationSource = LocationSource.raw();
+
+  // Read straight off disk in this isolate rather than waiting for the UI to
+  // send it: START can produce a GPS lock in well under a message round-trip,
+  // and a config message that lost that race would count down when the rider
+  // asked us not to.
+  final countdownEnabled = await SettingsService.instance.loadCountdownEnabled();
 
   // Ride lifecycle: 'acquiring' (waiting for the first usable fix) → 'countdown'
   // (GPS locked, 3-2-1) → 'recording'. The ride clock and the Ride row don't
@@ -356,6 +392,8 @@ Future<void> onStart(ServiceInstance service) async {
       'lon': smoothLon,
       'phase': phase,
       'countdown': countdown,
+      'pausedAtMs': pauseStartedAt?.millisecondsSinceEpoch,
+      'signalLost': signalLostAt != null,
     });
   }
 
@@ -418,39 +456,60 @@ Future<void> onStart(ServiceInstance service) async {
   // Countdown finished → the ride truly begins here. Stamp the clock and create
   // the Ride only now, and reset every accumulator + the filter/anchors so that
   // nothing sampled during acquisition or countdown leaks into the ride.
+  //
+  // `phase` deliberately stays put until the Ride row exists (see below), which
+  // leaves a window where a second caller would still see 'acquiring'. With the
+  // countdown enabled the 'countdown' phase closed that window; with it off,
+  // GPS lock calls straight through to here, so guard it explicitly — otherwise
+  // a second fix arriving mid-save starts a second ride.
+  var beginningRecording = false;
   Future<void> beginRecording() async {
-    final now = DateTime.now();
-    totalDistanceMeters = 0;
-    maxSpeedKmh = 0;
-    currentSpeedKmh = 0;
-    speedAtLastFix = 0;
-    recentFixes.clear();
-    movingSeconds = 0;
-    pointCount = 0;
-    rejectedStreak = 0;
-    kalman.reset();
-    smoothLat = null;
-    smoothLon = null;
-    lastLat = null;
-    lastLon = null;
-    lastFixAt = now;
-    signalLostAt = null;
-    startedAt = now;
-    ride = Ride()
-      ..startTime = now
-      ..gpsSource = 'raw';
-    rideId = await db.saveRide(ride!);
-    // Flip to recording only after the ride row exists, so an in-flight fix
-    // can't try to persist against rideId 0.
-    phase = 'recording';
-    countdown = 0;
+    if (beginningRecording || phase == 'recording') return;
+    beginningRecording = true;
+    try {
+      final now = DateTime.now();
+      totalDistanceMeters = 0;
+      maxSpeedKmh = 0;
+      currentSpeedKmh = 0;
+      speedAtLastFix = 0;
+      recentFixes.clear();
+      movingSeconds = 0;
+      pointCount = 0;
+      rejectedStreak = 0;
+      kalman.reset();
+      smoothLat = null;
+      smoothLon = null;
+      lastLat = null;
+      lastLon = null;
+      lastFixAt = now;
+      signalLostAt = null;
+      startedAt = now;
+      ride = Ride()
+        ..startTime = now
+        ..gpsSource = 'raw';
+      rideId = await db.saveRide(ride!);
+      // Flip to recording only after the ride row exists, so an in-flight fix
+      // can't try to persist against rideId 0.
+      phase = 'recording';
+      countdown = 0;
+    } finally {
+      // Released even on a failed save, so a later fix can retry rather than
+      // leaving the ride wedged in 'acquiring' with the timeout already spent.
+      beginningRecording = false;
+    }
     emitTelemetry();
   }
 
-  // First usable fix arrived → start the 3-2-1 countdown, then record.
+  // First usable fix arrived → start the 3-2-1 countdown, then record. When the
+  // rider has left the countdown off (the default), GPS lock leads straight into
+  // recording and the 'countdown' phase never happens.
   void beginCountdown() {
     if (phase != 'acquiring') return;
     acquireTimeout?.cancel();
+    if (!countdownEnabled) {
+      beginRecording();
+      return;
+    }
     phase = 'countdown';
     countdown = _kCountdownSeconds;
     emitTelemetry();
@@ -473,6 +532,14 @@ Future<void> onStart(ServiceInstance service) async {
     } else {
       cancelAcquire();
     }
+  });
+
+  // Tapping the counting-down number means "go now" — drop the rest of the
+  // countdown and begin the ride. Ignored in any other phase.
+  service.on('skipCountdown').listen((_) {
+    if (phase != 'countdown') return;
+    countdownTimer?.cancel();
+    beginRecording();
   });
 
   // 1 Hz heartbeat: keeps the duration/avg (and the notification) advancing even

@@ -23,6 +23,8 @@ class SettingsScreen extends ConsumerWidget {
     final unit = ref.watch(speedUnitProvider);
     final view = ref.watch(recordViewProvider);
     final gaugeStyle = ref.watch(speedGaugeStyleProvider);
+    final countdown = ref.watch(countdownEnabledProvider);
+    final keepScreenOn = ref.watch(keepScreenOnProvider);
 
     return Scaffold(
       backgroundColor: cx.canvas,
@@ -91,6 +93,38 @@ class SettingsScreen extends ConsumerWidget {
               style: TextStyle(color: cx.textDim, fontSize: 13),
             ),
             onTap: () => ref.read(speedGaugeStyleProvider.notifier).toggle(),
+          ),
+          const SizedBox(height: 24),
+          _SectionLabel('Recording'),
+          _SettingsTile(
+            icon: Icons.timer_3_outlined,
+            title: 'Start countdown',
+            subtitle: countdown
+                ? '3… 2… 1… before the clock starts. Tap it to skip.'
+                : 'Recording starts as soon as GPS locks on.',
+            trailing: Switch(
+              value: countdown,
+              activeThumbColor: cx.onAccent,
+              activeTrackColor: cx.accent,
+              onChanged: (_) =>
+                  ref.read(countdownEnabledProvider.notifier).toggle(),
+            ),
+            onTap: () => ref.read(countdownEnabledProvider.notifier).toggle(),
+          ),
+          const SizedBox(height: 12),
+          _SettingsTile(
+            icon: Icons.brightness_high_outlined,
+            title: 'Keep screen on',
+            subtitle: 'While a ride is recording. Uses more battery — '
+                'recording itself works with the screen off.',
+            trailing: Switch(
+              value: keepScreenOn,
+              activeThumbColor: cx.onAccent,
+              activeTrackColor: cx.accent,
+              onChanged: (_) =>
+                  ref.read(keepScreenOnProvider.notifier).toggle(),
+            ),
+            onTap: () => ref.read(keepScreenOnProvider.notifier).toggle(),
           ),
           const SizedBox(height: 24),
           _SectionLabel('Data'),
@@ -211,12 +245,17 @@ class _SettingsTile extends StatelessWidget {
   const _SettingsTile({
     required this.icon,
     required this.title,
+    this.subtitle,
     this.trailing,
     required this.onTap,
   });
 
   final IconData icon;
   final String title;
+
+  /// One line of consequence, for settings whose title doesn't say what turning
+  /// them on actually costs or does.
+  final String? subtitle;
   final Widget? trailing;
   final VoidCallback onTap;
 
@@ -245,11 +284,26 @@ class _SettingsTile extends StatelessWidget {
               ),
               const SizedBox(width: 14),
               Expanded(
-                child: Text(title,
-                    style: TextStyle(
-                        color: cx.textBright,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700)),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(title,
+                        style: TextStyle(
+                            color: cx.textBright,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700)),
+                    if (subtitle != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 3, right: 8),
+                        child: Text(subtitle!,
+                            style: TextStyle(
+                                color: cx.textTertiary,
+                                fontSize: kMinFontSize,
+                                height: 1.35)),
+                      ),
+                  ],
+                ),
               ),
               ?trailing,
             ],
