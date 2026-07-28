@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers/history_providers.dart';
 import '../providers/home_providers.dart';
+import '../providers/stats_providers.dart';
 import '../theme/app_theme.dart';
 import 'history_screen.dart';
 import 'settings_screen.dart';
@@ -44,8 +45,13 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       // legs (which carry a tripId, so they're excluded from the standalone list)
       // would vanish from History entirely.
       ref.invalidate(finishedTripsProvider);
-      // Re-run the best-effort place-name backfill for rides saved offline.
+      // This week's totals move with every save, so the week strip has to refetch
+      // for the same reason the list does.
+      ref.invalidate(weekStatsProvider);
+      // Re-run the best-effort place-name backfill for rides saved offline, and
+      // derive route keys/shapes for any ride still missing them.
       ref.invalidate(geocodeBackfillProvider);
+      ref.invalidate(routeBackfillProvider);
     }
     ref.read(homeTabProvider.notifier).state = i;
   }

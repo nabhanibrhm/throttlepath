@@ -9,6 +9,7 @@ import '../data/database_service.dart';
 import '../data/models/ride.dart';
 import '../data/models/track_point.dart';
 import 'location_source.dart';
+import 'route_derivation.dart';
 import 'settings_service.dart';
 
 /// Foreground-service notification id (arbitrary, stable across the app).
@@ -422,6 +423,11 @@ Future<void> onStart(ServiceInstance service) async {
       ..movingSeconds = movingSeconds
       ..averageSpeedKmh = finalAvg
       ..maxSpeedKmh = maxSpeedKmh;
+    // Derive the route identity + shape here, at the one moment the track is
+    // complete and nothing else is competing for it. Doing it in the UI instead
+    // would leave the fields null on any ride the rider backs out of, and the
+    // engine is where every other denormalised stat is already written.
+    await stampDerivedRoute(db, r);
     await db.saveRide(r);
 
     service.invoke('stopped', {

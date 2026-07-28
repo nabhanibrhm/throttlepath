@@ -9,6 +9,7 @@ import '../data/models/trip.dart';
 import '../data/trip_stats.dart';
 import '../services/geocode_backfill.dart';
 import '../services/permission_service.dart';
+import '../services/route_derivation.dart';
 
 /// Standalone rides (not part of any trip), newest first — the flat entries in
 /// History. Trip legs render under their trip instead. Auto-disposes so
@@ -32,6 +33,17 @@ final latestRideProvider = FutureProvider.autoDispose<Ride?>((ref) {
 /// each History-tab entry so a newly-online session gets another pass.
 final geocodeBackfillProvider = FutureProvider.autoDispose<void>((ref) async {
   await GeocodeBackfill.instance.run(
+    onUpdated: () => ref.invalidate(rideHistoryProvider),
+  );
+});
+
+/// Derives `routeKey` / `routeBlob` for rides recorded before those fields
+/// existed, so their History cards get a sparkline and they join the route-history
+/// pool. Fired on each History entry like [geocodeBackfillProvider], but unlike
+/// that one it needs no network, so it converges after a few visits and then costs
+/// one empty query.
+final routeBackfillProvider = FutureProvider.autoDispose<void>((ref) async {
+  await RouteBackfill.instance.run(
     onUpdated: () => ref.invalidate(rideHistoryProvider),
   );
 });

@@ -27,6 +27,8 @@ class MainActivity : FlutterActivity() {
                     "shareToInstagram" -> handleShare(call.argument("filePath"),
                         call.argument("topColor"), call.argument("bottomColor"), result)
                     "saveToGallery" -> handleSaveToGallery(call.argument("filePath"), result)
+                    "shareFile" -> handleShareFile(call.argument("filePath"),
+                        call.argument("mimeType"), call.argument("title"), result)
                     else -> result.notImplemented()
                 }
             }
@@ -106,6 +108,52 @@ class MainActivity : FlutterActivity() {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         startActivity(Intent.createChooser(send, "Share ride"))
+    }
+
+    /**
+     * Sends an arbitrary cached file out through the system share sheet.
+     *
+     * The image path above is Instagram-specific (ADD_TO_STORY, a PNG MIME type,
+     * an explicit package grant); GPX has no single destination — a rider mails it
+     * to themselves, drops it in Drive, or opens it in a mapping app — so this
+     * takes the MIME type from the caller and always shows the chooser.
+     */
+    private fun handleShareFile(
+        filePath: String?,
+        mimeType: String?,
+        title: String?,
+        result: MethodChannel.Result,
+    ) {
+        if (filePath.isNullOrEmpty()) {
+            result.error("no_path", "filePath is required", null)
+            return
+        }
+        val file = File(filePath)
+        if (!file.exists()) {
+            result.error("missing_file", "File not found: $filePath", null)
+            return
+        }
+
+        val uri: Uri = try {
+            FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+        } catch (e: IllegalArgumentException) {
+            result.error("provider_error", e.message, null)
+            return
+        }
+
+        val label = title ?: "Share"
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = mimeType ?: "*/*"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, label)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        try {
+            startActivity(Intent.createChooser(send, label))
+            result.success(null)
+        } catch (e: ActivityNotFoundException) {
+            result.error("no_target", "Nothing on this device can receive the file", null)
+        }
     }
 
     /**

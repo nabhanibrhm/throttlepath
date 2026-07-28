@@ -15,6 +15,12 @@ Per `CLAUDE.md`: strict phased delivery — finish one phase, stop, confirm on-d
 | 2 | Merge the mode enums? | ~~Yes — merge into `RideDisplayMode{dial,number,map,chart}`.~~ **REVERSED 2026-07-27: keep both axes.** `RecordView` and `SpeedGaugeStyle` stay separate; one inline control exposes both. | The merge was accepted believing it cost one combination. It doesn't: the enums are orthogonal, so 3 backdrops × 2 gauges = **six** reachable states, and flattening to four deletes three of them — map+dial (in use today), chart+dial and off+dial. F1's actual complaint is that the control lives in Settings, three taps from what it changes; that's fixable with one inline control without collapsing the matrix. |
 | 3 | Route-hash data layer in scope? | **Yes, at Phase 4.** | Coarse start/end geohash + time-of-day bucket. Cheap, and it is what makes auto-naming (F19), PB badges (F17) and "your fastest on this route" possible. Without it Phase 4 loses half its point. |
 
+**Vindicated at build time:** decision 3 carried Phase 4 *and* Phase 5. The same
+`routeKey` drives auto-naming, route records and the repeat-route sentence; the
+`routeBlob` beside it is what makes a History row recognisable without a query. Both
+backfill onto existing rides from data already on disk — no network, so they converge in
+a few History visits rather than never.
+
 **Migration discipline:** all new Isar fields land in **one** additive migration in Phase 4
 (`routeKey`, `routeBlob`, `smoothness`) so `build_runner` runs once, not three times.
 Old rows read null — same pattern as `gpsSource` / `startPlace`.
@@ -237,35 +243,140 @@ class missing on this API-28 device, with a sync fallback.
 
 ---
 
-## Phase 4 — Ride complete → share loop
-*fixes F15, F16, F17, F18, F19 (data), F31 · ~1 week*
+## Phase 4 — Ride complete → share loop ✅ BUILT & DEVICE-VERIFIED
+*fixes F15, F16, F17, F18, F19 (data), F31 · built with Phase 5 in one pass*
 
-- [ ] 4.1 **The one schema migration.** Add to `Ride`: `routeKey` (nullable String — coarse start/end geohash + time-of-day bucket), `routeBlob` (nullable — downsampled polyline for card sparklines, Phase 5), `smoothness` (nullable double, Phase 6). Then `dart run build_runner build --delete-conflicting-outputs`. Mind the `isar_community` version lock.
-- [ ] 4.2 Auto-naming from `routeKey` + time of day → "Morning commute" (F19). Keep the raw ID as small mono metadata.
-- [ ] 4.3 Name field gets a persistent label + one-tap suggestions, so the common case is zero typing (F16).
-- [ ] 4.4 Summary leads with route + distance hero, a comparison to their own average, and any PB earned (F17).
-- [ ] 4.5 **Discard leaves the button stack** → text action in the app bar (F15). Confirm dialog states the loss in their numbers: "Delete 15.27 km".
-- [ ] 4.6 Trip field appears only *after* choosing "Continue later", as a sheet with a one-sentence explanation of what a trip is (F16).
-- [ ] 4.7 Short-ride guard: under 100 m or 60 s → "Looks like this didn't go anywhere — discard?" with Save anyway secondary. Real empty states on detail screens for zero-distance rides (F18).
-- [ ] 4.8 **One-sheet share composer** replacing the two-modal chain (F31): full-width live preview, layout as a readable swipeable strip, destinations as a 54dp row. `showShareFlow()` in `share_flow.dart` is the seam.
-- [ ] 4.9 GPX export — the existing Kotlin channel is image-only (`MediaStore.Images` / `image/png`); needs a new branch or `share_plus`.
+- [x] 4.1 **The one schema migration**, exactly as planned: `routeKey` (`@Index()`ed — it
+      is the join key for auto-naming, route records and "fastest on this route"),
+      `routeBlob` (`List<double>?`, interleaved `[lat, lon, …]`), `smoothness`
+      (reserved, still written by nobody — Phase 6 owns it). `build_runner` ran once.
+- [x] 4.2 Auto-naming in `lib/core/route_key.dart`: 5-char geohash of each endpoint
+      (~4.9 km cells, deliberately loose so parking one street over still matches) +
+      a time-of-day band → `qqguw>qqgv2@morning`. Names read off it — "Morning
+      commute" once a route repeats twice, "Morning loop from Dago" when the ends
+      share a cell, "Morning ride to Lembang" otherwise.
+- [x] 4.3 Name field has a permanent `RIDE NAME` label and arrives **pre-filled**
+      with the best suggestion; the alternatives are 36dp chips below it. The common
+      case is now read-and-save — no typing, no tapping. Backing out of the summary
+      also applies the suggestion (it used to leave "Untitled ride" forever), but
+      never over a name the rider typed.
+- [x] 4.4 Summary leads with place route → distance hero + route sparkline → one
+      comparison sentence ("18% further than your average · ridden this route 3
+      times before"), with filled amber award badges above it when a record fell.
+      Four awards: longest distance, fastest average, longest time, fastest on this
+      route. Gated on ≥1 km and on the rider *having* a history, so a first test
+      ride can't crown itself.
+- [x] 4.5 Discard is a text action in the app bar; the confirm reads
+      **"Delete 0.03 km"**. Two buttons left in the stack, not three.
+- [x] 4.6 The trip-name field is gone from the summary. `CONTINUE AS A TRIP` opens a
+      sheet that explains what a trip is in one sentence, then asks for the name.
+- [x] 4.7 Short-ride guard fires on the summary's first frame under 100 m or 60 s:
+      "Looks like this didn't go anywhere — 26 m in 00:40", Discard leading, Save
+      anyway secondary. Detail screens got a real `NoTrackNotice` — the old empty
+      state was a 50%-dimmed map of *Jakarta*, which to a rider in Bandung reads as
+      a failed tile load or a route recorded somewhere they've never been.
+- [x] 4.8 **One-sheet share composer.** The preview *is* the sheet; swiping it
+      changes layout and moves a labelled chip strip (four unlabelled dots told the
+      rider how many styles existed and nothing about which one they were looking
+      at); destinations are a 54dp row of three. The old flow made them commit to a
+      postage-stamp thumbnail and *then* answer a question they hadn't been asked.
+- [x] 4.9 GPX 1.1 export (`lib/services/gpx_export.dart`) — one `<trkseg>` per trip
+      leg, `<ele>` only where a fix reported one, speed in `<extensions>` (1.1
+      dropped `<speed>` from `trkpt`). Needed **one** new Kotlin method,
+      `shareFile(path, mimeType, title)`: the existing `shareToInstagram` is a
+      targeted ADD_TO_STORY intent with an explicit package grant, which GPX has no
+      use for. `share_plus` was not added — it would have wanted its own
+      FileProvider next to the one already configured.
 
-**Verify:** analyze · test · device.
+**Verify:** analyze clean ✅ · **194 tests green** ✅ (61 new) · debug APK builds with
+the Kotlin change ✅ · `adb install -r` over the existing build, **ride DB intact**
+(30 entries, 419 km in July — byte-for-byte the same before and after) ✅.
+
+**Device pass 2026-07-28**, both themes, two throwaway rides both discarded. Confirmed:
+the summary's award/comparison block, pre-filled "Evening loop" with an "Evening ride"
+chip, app-bar Discard → "Delete 0.03 km", the short-ride prompt with real numbers, the
+composer's swipe-to-change-layout, and **GPX actually leaving the phone** — the system
+chooser opened on WhatsApp/Gmail/Drive and the file pulled back off the device is
+well-formed (`<?xml…><gpx version="1.1"…>`, 642 KB, one `trkseg`, correct `</gpx>`).
+Logcat clean of overflows and Dart exceptions.
 
 ---
 
-## Phase 5 — Rides list
-*fixes F20, F21, F22, F23, F24 · ~1–2 weeks*
+## Phase 5 — Rides list ✅ BUILT & DEVICE-VERIFIED
+*fixes F20, F21, F22, F23, F24*
 
-- [ ] 5.1 Aggregate queries in `DatabaseService` — **there are currently zero** (no `.count()`, no `.sum()`, no `startTime.between()`). `startTime` is already `@Index()`ed, so this is cheap.
-- [ ] 5.2 Week strip pinned above the list: distance, rides, streak, delta vs last week (F22) — the core retention answer. Also lands on the Record idle screen (deferred from 2.6).
-- [ ] 5.3 Date group headers; collapsing app bar keeping "Rides" + the week total; snap so rows never clip mid-card (F24).
-- [ ] 5.4 Card hierarchy: name → distance → route sparkline (from `routeBlob`) → one quiet metrics line. Red gone from list rows entirely (F20).
-- [ ] 5.5 Trips render as a bracketed parent with legs nested and a connector line (F21).
-- [ ] 5.6 Swipe reveals a **labelled** Delete; row leaves immediately with a 6s **Undo** snackbar (F23). Keep the modal only for discarding a never-saved ride.
-- [ ] 5.7 Search + filter chips with counts, running total on the result line, matches highlighted in the route line.
+- [x] 5.1 Aggregate queries in `DatabaseService` (there were zero): `getRidesStartedSince`
+      walks the existing `startTime` index as a **where-clause**, and `getRiderStats`
+      reduces with `count()` / `sum()` / `max()` on property queries so no `Ride` is
+      ever materialised. Every lifetime figure is computed **excluding** the ride
+      being judged — otherwise a just-saved ride ties its own record and is compared
+      against an average it is part of.
+- [x] 5.2 Week strip: distance, rides, moving time, streak, delta vs last week.
+      A `compact` one-line variant lands on the Record idle screen (deferred here
+      from 2.6). Streak counts back from *last* week when the current one is still
+      empty — otherwise every Monday morning reads as a broken streak.
+- [x] 5.3 **Month** group headers with each month's total, and a collapsing
+      `SliverAppBar` (`floating` + `snap`, so it is never parked halfway across a
+      card) that keeps "Rides · 59.2 km this week" once the strip is out of the way.
+- [x] 5.4 Card hierarchy: name → distance → **route sparkline** → one quiet metrics
+      line. No red anywhere in a row; peak carries the neutral `peak` token.
+- [x] 5.5 Trips are a bracketed parent (a 3dp amber edge down the left, spanning the
+      header via `IntrinsicHeight`) that expands in place to nested legs on a
+      numbered connector — the last leg's line stops at its own node, since a line
+      running past it implies another leg is coming.
+- [x] 5.6 Swipe reveals a **labelled** red Delete; the row leaves at once and a 6s
+      Undo snackbar is the safety net. Nothing reaches the DB until that window
+      closes — and `dispose` commits any pending delete, so a rider who swipes and
+      immediately leaves doesn't find the row resurrected next launch.
+- [x] 5.7 Search over names *and* place names, filter chips carrying live counts
+      (computed over the searched set, so a chip can't promise rows it won't
+      deliver), a running total on the result line ("26 results · 348.4 km"), and
+      matches picked out in amber in the route line.
 
-**Verify:** analyze · test · device.
+**Deliberate simplification:** the search field and filter chips scroll away with the
+list instead of pinning under the app bar. Pinned, they cost ~90dp of permanent chrome
+on every scroll; you search once and then browse the results.
+
+**Verify:** analyze clean ✅ · 194 tests green ✅ (`test/history_list_test.dart` pumps the
+real screen with the DB providers overridden, at the device's 353dp width, in both
+themes) ✅ · device pass on 30 real entries across 5 trips ✅.
+
+### The tests had to load the real font before they were worth anything
+
+The first overflow run failed on layouts that are fine in the app: the test binding
+falls back to a placeholder font whose every glyph is a square of the font size, ~40%
+wider than Inter. It would have pushed the design into shrinking to satisfy a font
+nobody ships. `test/history_list_test.dart` now loads the bundled Inter TTFs in
+`setUpAll` and pins the surface to 353 × 760 — a `MediaQuery` override alone changes
+only what widgets *read*, not the box they are laid out in, so the 800 × 600 default
+was hiding every horizontal overflow in a card.
+
+### Five things only the device caught
+
+1. **The metrics line wrapped**, stranding "peak km/h" alone on a second row. It ran to
+   61 characters with moving time in it. Moving time is now left to the detail screen.
+2. **47dp of dead space under the week strip.** The reserved height was guessed at 138dp
+   against a real 92dp. The strip is also no longer given a fixed height at all — a
+   `Positioned` with left+right+top leaves the vertical constraint loose, so a larger
+   system text scale clips gracefully instead of throwing.
+3. **A week down 58% drew `trending_flat`**, which says "level" — the opposite of what
+   happened. Three-way now; down stays neutral ink, because riding less is not an error.
+4. **Sparklines used a third of the card.** Aspect ratio was being preserved, which is
+   right in a square box and wrong in a 290 × 44 one: a north–south Bekasi commute
+   became a narrow squiggle in an empty strip. Each axis is now normalised
+   independently — a sparkline is read on its *pattern of turns*, and the real geometry
+   is one tap away on the map.
+5. **"100% shorter than your average"** on a 26 m recording — arithmetically right,
+   semantically nonsense (100% shorter is zero). No comparison is drawn below the 1 km
+   award floor. The same recording had also been stamped with a `routeKey` (both ends in
+   one coarse cell) and announced as "ridden this route once before"; a key is a claim
+   about where you went, so nothing under `kRouteMinDistanceMeters` (200 m) gets one —
+   and nothing under it draws a sparkline either, since that trace is pure GPS drift.
+
+**Still wants a real moving ride.** Both throwaway recordings were stationary indoors,
+so the route key stamped at ride end has only been exercised on a 6 m wiggle live; the
+backfill path over 25 real rides is what proves the derivation, and it does look right
+(two directions of the same commute draw as mirror images, start/end dots swapped).
 
 ---
 

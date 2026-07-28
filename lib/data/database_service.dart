@@ -4,6 +4,7 @@ import 'package:path_provider/path_provider.dart';
 import 'models/ride.dart';
 import 'models/track_point.dart';
 import 'models/trip.dart';
+import 'ride_stats.dart';
 
 /// Single owner of the Isar instance for the whole app.
 ///
@@ -115,12 +116,135 @@ class DatabaseService {
     });
   }
 
+  /// Stores the derived route identity + shape on a ride (see `route_key.dart`
+  /// and `route_blob.dart`). Written once when the ride finalises, and by the
+  /// backfill for rides recorded before these fields existed. No-op if the ride
+  /// was deleted in between.
+  Future<void> setRideRoute(
+    int rideId, {
+    String? routeKey,
+    List<double>? routeBlob,
+  }) {
+    return isar.writeTxn(() async {
+      final ride = await isar.rides.get(rideId);
+      if (ride == null) return;
+      ride.routeKey = routeKey;
+      ride.routeBlob = routeBlob;
+      await isar.rides.put(ride);
+    });
+  }
+
+  /// Finished rides still missing a derived route (either field), newest first —
+  /// the work-list for the route backfill. Rides still recording are skipped:
+  /// their shape isn't final yet.
+  Future<List<Ride>> getRidesMissingRoute() {
+    return isar.rides
+        .filter()
+        .endTimeIsNotNull()
+        .group((q) => q.routeKeyIsNull().or().routeBlobIsNull())
+        .sortByStartTimeDesc()
+        .findAll();
+  }
+
   /// Deletes a ride and every track point that belongs to it.
   Future<void> deleteRide(int rideId) {
     return isar.writeTxn(() async {
       await isar.trackPoints.filter().rideIdEqualTo(rideId).deleteAll();
       await isar.rides.delete(rideId);
     });
+  }
+
+  // --- Aggregates ----------------------------------------------------------
+  //
+  // Everything below reduces in the DB rather than in Dart: `count()`, `sum()`,
+  // `max()` on a property query never materialise a Ride, and the `startTime`
+  // range walks the existing index. That matters because these run on every
+  // History entry and on every ride save.
+
+  /// Finished rides that started at or after [from], newest first.
+  ///
+  /// Uses the `startTime` index directly (a where-clause, not a filter), so a
+  /// four-week window stays cheap however long the history gets. Trip legs are
+  /// included — a week's distance is a week's distance regardless of how the ride
+  /// was filed.
+  Future<List<Ride>> getRidesStartedSince(DateTime from) {
+    return isar.rides
+        .where()
+        .startTimeGreaterThan(from, include: true)
+        .filter()
+        .endTimeIsNotNull()
+        .sortByStartTimeDesc()
+        .findAll();
+  }
+
+  /// Lifetime bests and totals across every finished ride *except* [excludeRideId]
+  /// (pass a negative id to include everything).
+  ///
+  /// Excluding one ride is the point: a just-finished ride is already persisted by
+  /// the time the summary screen asks "is this a record?", so comparing against
+  /// the unfiltered history would have every ride tie its own best.
+  Future<RiderStats> getRiderStats({int excludeRideId = -1}) async {
+    QueryBuilder<Ride, Ride, QAfterFilterCondition> base() => isar.rides
+        .filter()
+        .endTimeIsNotNull()
+        .and()
+        .not()
+        .idEqualTo(excludeRideId);
+
+    final count = await base().count();
+    if (count == 0) return RiderStats.empty;
+    final total = await base().totalDistanceMetersProperty().sum();
+    final longest = await base().totalDistanceMetersProperty().max();
+    final bestAvg = await base().averageSpeedKmhProperty().max();
+    final longestDuration = await base().durationSecondsProperty().max();
+
+    return RiderStats(
+      rideCount: count,
+      totalDistanceMeters: total,
+      longestDistanceMeters: longest ?? 0,
+      bestAvgSpeedKmh: bestAvg ?? 0,
+      longestDurationSeconds: longestDuration ?? 0,
+    );
+  }
+
+  /// Bests on one route, across every finished ride carrying [routeKey] except
+  /// [excludeRideId].
+  ///
+  /// Returns [RouteStats.empty] for a null/blank key rather than treating "unknown
+  /// route" as a route — otherwise every pre-migration ride would share one giant
+  /// bucket and compete for its records.
+  Future<RouteStats> getRouteStats(String? routeKey,
+      {int excludeRideId = -1}) async {
+    if (routeKey == null || routeKey.isEmpty) return RouteStats.empty;
+    // One route holds a handful of rides, so reducing these in Dart costs less
+    // than four round-trips through the query engine.
+    final rides = await isar.rides
+        .where()
+        .routeKeyEqualTo(routeKey)
+        .filter()
+        .endTimeIsNotNull()
+        .and()
+        .not()
+        .idEqualTo(excludeRideId)
+        .findAll();
+    return RouteStats.from(rides);
+  }
+
+  /// How many finished rides already share [routeKey], not counting
+  /// [excludeRideId] — what decides whether a route is routine enough to be named
+  /// a "commute".
+  Future<int> countRidesOnRoute(String? routeKey,
+      {int excludeRideId = -1}) async {
+    if (routeKey == null || routeKey.isEmpty) return 0;
+    return isar.rides
+        .where()
+        .routeKeyEqualTo(routeKey)
+        .filter()
+        .endTimeIsNotNull()
+        .and()
+        .not()
+        .idEqualTo(excludeRideId)
+        .count();
   }
 
   // --- Trip helpers --------------------------------------------------------

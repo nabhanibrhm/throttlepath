@@ -110,6 +110,34 @@ class RideShare {
         : ShareOutcome.systemChooser;
   }
 
+  /// Renders [ride] (+ its [points]) and opens the system share sheet on the PNG
+  /// — WhatsApp, Telegram, mail, anything installed.
+  ///
+  /// Separate from [shareToInstagram] because that one is a targeted intent
+  /// (ADD_TO_STORY, with an explicit package grant) that only *falls back* to the
+  /// chooser; this asks for the chooser outright, so "More…" doesn't have to
+  /// pretend to be a failed Instagram share.
+  ///
+  /// Throws if capture or the platform call fails.
+  static Future<void> shareToSystem({
+    required BuildContext context,
+    required Ride ride,
+    required List<TrackPoint> points,
+    required SpeedUnit unit,
+    required ShareLayout layout,
+    List<int> legStarts = const [],
+  }) async {
+    final pngBytes =
+        await _renderPng(context, ride, points, unit, layout, legStarts);
+    final file = await _writeToCache(ride, pngBytes);
+    final name = ride.name?.trim();
+    await _channel.invokeMethod('shareFile', {
+      'filePath': file.path,
+      'mimeType': 'image/png',
+      'title': name?.isNotEmpty == true ? name! : 'ThrottlePath ride',
+    });
+  }
+
   /// Renders [ride] (+ its [points]) and saves it into the device's Photos
   /// app, in a "ThrottlePath" album. Android 10+ needs no permission for this
   /// (scoped storage); on older Android the native side reports back if the

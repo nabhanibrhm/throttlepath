@@ -4,4 +4,7 @@
          on Android is getCacheDir()) so generated share PNGs can be exposed as
          content:// URIs without touching public storage. -->
     <cache-path name="share_images" path="share_images/" />
+    <!-- Same idea for exported GPX tracks, which go out through the system share
+         sheet rather than to a specific app. -->
+    <cache-path name="share_files" path="share_files/" />
 </paths>

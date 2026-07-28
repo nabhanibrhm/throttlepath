@@ -61,4 +61,34 @@ class Ride {
   /// cheaply by trip id. Additive — old rides read as null.
   @Index()
   int? tripId;
+
+  /// Coarse identity of "this route at this time of day" — a deliberately fuzzy
+  /// key that groups repeats of the same journey. Built by `buildRouteKey` from a
+  /// 5-character geohash of the start and end fixes (~±2.4 km, so parking in a
+  /// different spot still matches) plus a time-of-day bucket, e.g.
+  /// `qqguw>qqgv2@morning`.
+  ///
+  /// Indexed because it is the join key for everything route-aware: auto-naming
+  /// ("Morning commute" once a route repeats), personal bests scoped to a route,
+  /// and "your fastest on this route". Null for rides recorded before the key
+  /// existed and for rides with no usable fixes — always treat null as "unknown
+  /// route", never as a route in its own right.
+  @Index()
+  String? routeKey;
+
+  /// The ride's shape, downsampled to at most `kRouteBlobMaxPoints` fixes and
+  /// stored as a flat interleaved `[lat, lon, lat, lon, …]` list — the sparkline
+  /// a History card draws without touching the (potentially thousands of rows)
+  /// `TrackPoint` collection.
+  ///
+  /// Denormalised on purpose: a list row must not cost a query. Null for old
+  /// rides until the route backfill fills it in, and for rides with fewer than
+  /// two fixes (nothing to draw).
+  List<double>? routeBlob;
+
+  /// Ride smoothness on a 0–100 scale, derived from acceleration/braking
+  /// variance. Reserved by the Phase 4 migration and **written by Phase 6** — the
+  /// alternative was loading ten full tracks every time the analysis screen
+  /// opened. Null on every ride until then.
+  double? smoothness;
 }

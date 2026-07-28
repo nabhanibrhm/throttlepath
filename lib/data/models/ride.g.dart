@@ -53,22 +53,37 @@ const RideSchema = CollectionSchema(
       type: IsarType.long,
     ),
     r'name': PropertySchema(id: 7, name: r'name', type: IsarType.string),
-    r'startPlace': PropertySchema(
+    r'routeBlob': PropertySchema(
       id: 8,
+      name: r'routeBlob',
+      type: IsarType.doubleList,
+    ),
+    r'routeKey': PropertySchema(
+      id: 9,
+      name: r'routeKey',
+      type: IsarType.string,
+    ),
+    r'smoothness': PropertySchema(
+      id: 10,
+      name: r'smoothness',
+      type: IsarType.double,
+    ),
+    r'startPlace': PropertySchema(
+      id: 11,
       name: r'startPlace',
       type: IsarType.string,
     ),
     r'startTime': PropertySchema(
-      id: 9,
+      id: 12,
       name: r'startTime',
       type: IsarType.dateTime,
     ),
     r'totalDistanceMeters': PropertySchema(
-      id: 10,
+      id: 13,
       name: r'totalDistanceMeters',
       type: IsarType.double,
     ),
-    r'tripId': PropertySchema(id: 11, name: r'tripId', type: IsarType.long),
+    r'tripId': PropertySchema(id: 14, name: r'tripId', type: IsarType.long),
   },
 
   estimateSize: _rideEstimateSize,
@@ -100,6 +115,19 @@ const RideSchema = CollectionSchema(
           name: r'tripId',
           type: IndexType.value,
           caseSensitive: false,
+        ),
+      ],
+    ),
+    r'routeKey': IndexSchema(
+      id: 2163084831033836716,
+      name: r'routeKey',
+      unique: false,
+      replace: false,
+      properties: [
+        IndexPropertySchema(
+          name: r'routeKey',
+          type: IndexType.hash,
+          caseSensitive: true,
         ),
       ],
     ),
@@ -138,6 +166,18 @@ int _rideEstimateSize(
     }
   }
   {
+    final value = object.routeBlob;
+    if (value != null) {
+      bytesCount += 3 + value.length * 8;
+    }
+  }
+  {
+    final value = object.routeKey;
+    if (value != null) {
+      bytesCount += 3 + value.length * 3;
+    }
+  }
+  {
     final value = object.startPlace;
     if (value != null) {
       bytesCount += 3 + value.length * 3;
@@ -160,10 +200,13 @@ void _rideSerialize(
   writer.writeDouble(offsets[5], object.maxSpeedKmh);
   writer.writeLong(offsets[6], object.movingSeconds);
   writer.writeString(offsets[7], object.name);
-  writer.writeString(offsets[8], object.startPlace);
-  writer.writeDateTime(offsets[9], object.startTime);
-  writer.writeDouble(offsets[10], object.totalDistanceMeters);
-  writer.writeLong(offsets[11], object.tripId);
+  writer.writeDoubleList(offsets[8], object.routeBlob);
+  writer.writeString(offsets[9], object.routeKey);
+  writer.writeDouble(offsets[10], object.smoothness);
+  writer.writeString(offsets[11], object.startPlace);
+  writer.writeDateTime(offsets[12], object.startTime);
+  writer.writeDouble(offsets[13], object.totalDistanceMeters);
+  writer.writeLong(offsets[14], object.tripId);
 }
 
 Ride _rideDeserialize(
@@ -182,10 +225,13 @@ Ride _rideDeserialize(
   object.maxSpeedKmh = reader.readDouble(offsets[5]);
   object.movingSeconds = reader.readLong(offsets[6]);
   object.name = reader.readStringOrNull(offsets[7]);
-  object.startPlace = reader.readStringOrNull(offsets[8]);
-  object.startTime = reader.readDateTime(offsets[9]);
-  object.totalDistanceMeters = reader.readDouble(offsets[10]);
-  object.tripId = reader.readLongOrNull(offsets[11]);
+  object.routeBlob = reader.readDoubleList(offsets[8]);
+  object.routeKey = reader.readStringOrNull(offsets[9]);
+  object.smoothness = reader.readDoubleOrNull(offsets[10]);
+  object.startPlace = reader.readStringOrNull(offsets[11]);
+  object.startTime = reader.readDateTime(offsets[12]);
+  object.totalDistanceMeters = reader.readDouble(offsets[13]);
+  object.tripId = reader.readLongOrNull(offsets[14]);
   return object;
 }
 
@@ -213,12 +259,18 @@ P _rideDeserializeProp<P>(
     case 7:
       return (reader.readStringOrNull(offset)) as P;
     case 8:
-      return (reader.readStringOrNull(offset)) as P;
+      return (reader.readDoubleList(offset)) as P;
     case 9:
-      return (reader.readDateTime(offset)) as P;
+      return (reader.readStringOrNull(offset)) as P;
     case 10:
-      return (reader.readDouble(offset)) as P;
+      return (reader.readDoubleOrNull(offset)) as P;
     case 11:
+      return (reader.readStringOrNull(offset)) as P;
+    case 12:
+      return (reader.readDateTime(offset)) as P;
+    case 13:
+      return (reader.readDouble(offset)) as P;
+    case 14:
       return (reader.readLongOrNull(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
@@ -554,6 +606,81 @@ extension RideQueryWhere on QueryBuilder<Ride, Ride, QWhereClause> {
           includeUpper: includeUpper,
         ),
       );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterWhereClause> routeKeyIsNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(
+        IndexWhereClause.equalTo(indexName: r'routeKey', value: [null]),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterWhereClause> routeKeyIsNotNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(
+        IndexWhereClause.between(
+          indexName: r'routeKey',
+          lower: [null],
+          includeLower: false,
+          upper: [],
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterWhereClause> routeKeyEqualTo(
+    String? routeKey,
+  ) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(
+        IndexWhereClause.equalTo(indexName: r'routeKey', value: [routeKey]),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterWhereClause> routeKeyNotEqualTo(
+    String? routeKey,
+  ) {
+    return QueryBuilder.apply(this, (query) {
+      if (query.whereSort == Sort.asc) {
+        return query
+            .addWhereClause(
+              IndexWhereClause.between(
+                indexName: r'routeKey',
+                lower: [],
+                upper: [routeKey],
+                includeUpper: false,
+              ),
+            )
+            .addWhereClause(
+              IndexWhereClause.between(
+                indexName: r'routeKey',
+                lower: [routeKey],
+                includeLower: false,
+                upper: [],
+              ),
+            );
+      } else {
+        return query
+            .addWhereClause(
+              IndexWhereClause.between(
+                indexName: r'routeKey',
+                lower: [routeKey],
+                includeLower: false,
+                upper: [],
+              ),
+            )
+            .addWhereClause(
+              IndexWhereClause.between(
+                indexName: r'routeKey',
+                lower: [],
+                upper: [routeKey],
+                includeUpper: false,
+              ),
+            );
+      }
     });
   }
 }
@@ -1443,6 +1570,403 @@ extension RideQueryFilter on QueryBuilder<Ride, Ride, QFilterCondition> {
     });
   }
 
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> routeBlobIsNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        const FilterCondition.isNull(property: r'routeBlob'),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> routeBlobIsNotNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        const FilterCondition.isNotNull(property: r'routeBlob'),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> routeBlobElementEqualTo(
+    double value, {
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.equalTo(
+          property: r'routeBlob',
+          value: value,
+
+          epsilon: epsilon,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> routeBlobElementGreaterThan(
+    double value, {
+    bool include = false,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.greaterThan(
+          include: include,
+          property: r'routeBlob',
+          value: value,
+
+          epsilon: epsilon,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> routeBlobElementLessThan(
+    double value, {
+    bool include = false,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.lessThan(
+          include: include,
+          property: r'routeBlob',
+          value: value,
+
+          epsilon: epsilon,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> routeBlobElementBetween(
+    double lower,
+    double upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.between(
+          property: r'routeBlob',
+          lower: lower,
+          includeLower: includeLower,
+          upper: upper,
+          includeUpper: includeUpper,
+
+          epsilon: epsilon,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> routeBlobLengthEqualTo(
+    int length,
+  ) {
+    return QueryBuilder.apply(this, (query) {
+      return query.listLength(r'routeBlob', length, true, length, true);
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> routeBlobIsEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.listLength(r'routeBlob', 0, true, 0, true);
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> routeBlobIsNotEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.listLength(r'routeBlob', 0, false, 999999, true);
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> routeBlobLengthLessThan(
+    int length, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.listLength(r'routeBlob', 0, true, length, include);
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> routeBlobLengthGreaterThan(
+    int length, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.listLength(r'routeBlob', length, include, 999999, true);
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> routeBlobLengthBetween(
+    int lower,
+    int upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.listLength(
+        r'routeBlob',
+        lower,
+        includeLower,
+        upper,
+        includeUpper,
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> routeKeyIsNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        const FilterCondition.isNull(property: r'routeKey'),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> routeKeyIsNotNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        const FilterCondition.isNotNull(property: r'routeKey'),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> routeKeyEqualTo(
+    String? value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.equalTo(
+          property: r'routeKey',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> routeKeyGreaterThan(
+    String? value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.greaterThan(
+          include: include,
+          property: r'routeKey',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> routeKeyLessThan(
+    String? value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.lessThan(
+          include: include,
+          property: r'routeKey',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> routeKeyBetween(
+    String? lower,
+    String? upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.between(
+          property: r'routeKey',
+          lower: lower,
+          includeLower: includeLower,
+          upper: upper,
+          includeUpper: includeUpper,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> routeKeyStartsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.startsWith(
+          property: r'routeKey',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> routeKeyEndsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.endsWith(
+          property: r'routeKey',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> routeKeyContains(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.contains(
+          property: r'routeKey',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> routeKeyMatches(
+    String pattern, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.matches(
+          property: r'routeKey',
+          wildcard: pattern,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> routeKeyIsEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.equalTo(property: r'routeKey', value: ''),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> routeKeyIsNotEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.greaterThan(property: r'routeKey', value: ''),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> smoothnessIsNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        const FilterCondition.isNull(property: r'smoothness'),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> smoothnessIsNotNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        const FilterCondition.isNotNull(property: r'smoothness'),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> smoothnessEqualTo(
+    double? value, {
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.equalTo(
+          property: r'smoothness',
+          value: value,
+
+          epsilon: epsilon,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> smoothnessGreaterThan(
+    double? value, {
+    bool include = false,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.greaterThan(
+          include: include,
+          property: r'smoothness',
+          value: value,
+
+          epsilon: epsilon,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> smoothnessLessThan(
+    double? value, {
+    bool include = false,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.lessThan(
+          include: include,
+          property: r'smoothness',
+          value: value,
+
+          epsilon: epsilon,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> smoothnessBetween(
+    double? lower,
+    double? upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.between(
+          property: r'smoothness',
+          lower: lower,
+          includeLower: includeLower,
+          upper: upper,
+          includeUpper: includeUpper,
+
+          epsilon: epsilon,
+        ),
+      );
+    });
+  }
+
   QueryBuilder<Ride, Ride, QAfterFilterCondition> startPlaceIsNull() {
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
@@ -1914,6 +2438,30 @@ extension RideQuerySortBy on QueryBuilder<Ride, Ride, QSortBy> {
     });
   }
 
+  QueryBuilder<Ride, Ride, QAfterSortBy> sortByRouteKey() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'routeKey', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterSortBy> sortByRouteKeyDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'routeKey', Sort.desc);
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterSortBy> sortBySmoothness() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'smoothness', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterSortBy> sortBySmoothnessDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'smoothness', Sort.desc);
+    });
+  }
+
   QueryBuilder<Ride, Ride, QAfterSortBy> sortByStartPlace() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'startPlace', Sort.asc);
@@ -2072,6 +2620,30 @@ extension RideQuerySortThenBy on QueryBuilder<Ride, Ride, QSortThenBy> {
     });
   }
 
+  QueryBuilder<Ride, Ride, QAfterSortBy> thenByRouteKey() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'routeKey', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterSortBy> thenByRouteKeyDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'routeKey', Sort.desc);
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterSortBy> thenBySmoothness() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'smoothness', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterSortBy> thenBySmoothnessDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'smoothness', Sort.desc);
+    });
+  }
+
   QueryBuilder<Ride, Ride, QAfterSortBy> thenByStartPlace() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'startPlace', Sort.asc);
@@ -2176,6 +2748,26 @@ extension RideQueryWhereDistinct on QueryBuilder<Ride, Ride, QDistinct> {
     });
   }
 
+  QueryBuilder<Ride, Ride, QDistinct> distinctByRouteBlob() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'routeBlob');
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QDistinct> distinctByRouteKey({
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'routeKey', caseSensitive: caseSensitive);
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QDistinct> distinctBySmoothness() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'smoothness');
+    });
+  }
+
   QueryBuilder<Ride, Ride, QDistinct> distinctByStartPlace({
     bool caseSensitive = true,
   }) {
@@ -2255,6 +2847,24 @@ extension RideQueryProperty on QueryBuilder<Ride, Ride, QQueryProperty> {
   QueryBuilder<Ride, String?, QQueryOperations> nameProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'name');
+    });
+  }
+
+  QueryBuilder<Ride, List<double>?, QQueryOperations> routeBlobProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'routeBlob');
+    });
+  }
+
+  QueryBuilder<Ride, String?, QQueryOperations> routeKeyProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'routeKey');
+    });
+  }
+
+  QueryBuilder<Ride, double?, QQueryOperations> smoothnessProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'smoothness');
     });
   }
 

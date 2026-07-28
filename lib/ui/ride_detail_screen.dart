@@ -16,6 +16,7 @@ import '../providers/settings_providers.dart';
 import '../theme/app_theme.dart';
 import 'accel_brake_chart.dart';
 import 'elevation_speed_chart.dart';
+import 'no_track_notice.dart';
 import 'place_route_label.dart';
 import 'rename_dialog.dart';
 import 'share_flow.dart';
@@ -29,8 +30,6 @@ class RideDetailScreen extends ConsumerStatefulWidget {
   const RideDetailScreen({super.key, required this.ride});
 
   final Ride ride;
-
-  static const LatLng _fallbackCenter = LatLng(-6.2088, 106.8456); // Jakarta
 
   @override
   ConsumerState<RideDetailScreen> createState() => _RideDetailScreenState();
@@ -200,19 +199,7 @@ class _RouteMap extends StatelessWidget {
     final route = [for (final p in points) LatLng(p.latitude, p.longitude)];
 
     if (route.isEmpty) {
-      return Stack(
-        children: [
-          const _BaseMap(center: RideDetailScreen._fallbackCenter),
-          Container(
-            color: cx.canvas.withValues(alpha: 0.5),
-            alignment: Alignment.center,
-            child: Text(
-              'No track recorded for this ride',
-              style: TextStyle(color: cx.textDim),
-            ),
-          ),
-        ],
-      );
+      return const NoTrackNotice(subject: 'ride');
     }
 
     final speeds = [for (final p in points) p.speedMps * 3.6]; // km/h
@@ -394,32 +381,6 @@ class _SpeedLegend extends StatelessWidget {
   }
 }
 
-/// Tile-only map used behind the "no track" message.
-class _BaseMap extends StatelessWidget {
-  const _BaseMap({required this.center});
-
-  final LatLng center;
-
-  @override
-  Widget build(BuildContext context) {
-    final cx = AppColors.of(context);
-    return FlutterMap(
-      options: MapOptions(
-        backgroundColor: cx.canvas,
-        initialCenter: center,
-        initialZoom: 12,
-      ),
-      children: [
-        TileLayer(
-          urlTemplate: basemapUrl(cx.isDark),
-          subdomains: const ['a', 'b', 'c', 'd'],
-          userAgentPackageName: 'id.co.opentrack.throttlepath',
-          tileProvider: NetworkTileProvider(silenceExceptions: true),
-        ),
-      ],
-    );
-  }
-}
 
 /// Bottom stats panel — distance, elapsed vs moving time, avg/max speed.
 class _SummaryPanel extends StatelessWidget {

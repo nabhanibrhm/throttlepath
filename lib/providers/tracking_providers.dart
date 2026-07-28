@@ -309,15 +309,28 @@ class TrackingController extends StateNotifier<TrackingUiState> {
     _resetToIdle();
   }
 
-  /// Dismisses the summary without naming or deleting — the ride stays in the DB
-  /// unnamed (crash-safe default when the rider just backs out). If a
-  /// continuation was pending, the leg is still linked to its (open) trip so a
-  /// lazy back-out doesn't orphan it.
-  Future<void> keepFinishedRide() async {
+  /// Dismisses the summary without deleting — the ride stays in the DB (crash-safe
+  /// default when the rider just backs out). If a continuation was pending, the
+  /// leg is still linked to its (open) trip so a lazy back-out doesn't orphan it.
+  ///
+  /// [fallbackName] is the summary's auto-generated suggestion. Backing out used
+  /// to leave the ride as "Untitled ride" forever; now the suggestion stands in,
+  /// but only for a ride that has no name at all — a name the rider typed and then
+  /// backed out of confirming is theirs, and is never overwritten.
+  Future<void> keepFinishedRide({String? fallbackName}) async {
     final tripId = state.continuingTripId;
     final t = state.lastFinished;
-    if (tripId != null && t != null) {
-      await DatabaseService.instance.setRideTrip(t.rideId, tripId);
+    if (t != null) {
+      final auto = fallbackName?.trim() ?? '';
+      if (auto.isNotEmpty) {
+        final ride = await DatabaseService.instance.getRideById(t.rideId);
+        if (ride != null && (ride.name?.trim().isEmpty ?? true)) {
+          await DatabaseService.instance.setRideName(t.rideId, auto);
+        }
+      }
+      if (tripId != null) {
+        await DatabaseService.instance.setRideTrip(t.rideId, tripId);
+      }
     }
     _resetToIdle(clearContinuation: true);
   }

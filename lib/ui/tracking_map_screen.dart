@@ -16,6 +16,7 @@ import '../data/models/ride.dart';
 import '../providers/history_providers.dart';
 import '../providers/home_providers.dart';
 import '../providers/settings_providers.dart';
+import '../providers/stats_providers.dart';
 import '../providers/tracking_providers.dart';
 import '../services/permission_service.dart';
 import '../services/tracking_service.dart' show LiveTelemetry;
@@ -24,6 +25,7 @@ import 'analog_speed_gauge.dart';
 import 'ride_display_switcher.dart';
 import 'ride_summary_screen.dart';
 import 'live_speed_chart.dart';
+import 'week_strip.dart';
 
 /// CartoDB basemap URL for the given brightness — dark tiles on the dark theme,
 /// light tiles on the light theme.
@@ -218,12 +220,23 @@ class _TrackingMapScreenState extends ConsumerState<TrackingMapScreen> {
       }
       // A ride just finished → open the summary screen once.
       if (next.lastFinished != null && prev?.lastFinished == null) {
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) =>
-                RideSummaryScreen(telemetry: next.lastFinished!),
-          ),
-        );
+        Navigator.of(context)
+            .push(
+              MaterialPageRoute(
+                builder: (_) =>
+                    RideSummaryScreen(telemetry: next.lastFinished!),
+              ),
+            )
+            .then((_) {
+          if (!context.mounted) return;
+          // The idle sheet's week total and last-ride row are `autoDispose`, but
+          // History sits in the same IndexedStack and never unmounts — so it
+          // keeps both providers alive and they'd serve the snapshot taken
+          // before this ride existed. Same reason `home_shell` invalidates on
+          // tab entry.
+          ref.invalidate(weekStatsProvider);
+          ref.invalidate(latestRideProvider);
+        });
       }
       if (next.error != null && next.error != prev?.error) {
         ScaffoldMessenger.of(context)
@@ -1814,11 +1827,22 @@ class _IdleContext extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final latest = ref.watch(latestRideProvider);
+    final week = ref.watch(weekStatsProvider).valueOrNull;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _GpsReadinessRow(accuracyMeters: accuracyMeters),
-        const SizedBox(height: 14),
+        const SizedBox(height: 12),
+        // The week's running total, one line (Phase 5.2, deferred here from 2.6).
+        // Reserved even while the query is in flight, for the same reason as the
+        // last-ride row below.
+        SizedBox(
+          height: 20,
+          child: week == null
+              ? null
+              : WeekStrip(stats: week, unit: unit, compact: true),
+        ),
+        const SizedBox(height: 12),
         // Fixed height in every state — loading, empty and populated — so the
         // sheet doesn't jolt upward when the query lands a frame later.
         SizedBox(

@@ -13,6 +13,7 @@ import '../providers/home_providers.dart';
 import '../providers/settings_providers.dart';
 import '../providers/tracking_providers.dart';
 import '../theme/app_theme.dart';
+import 'no_track_notice.dart';
 import 'place_route_label.dart';
 import 'rename_dialog.dart';
 import 'ride_detail_screen.dart';
@@ -39,8 +40,6 @@ class TripDetailScreen extends ConsumerStatefulWidget {
   const TripDetailScreen({super.key, required this.trip});
 
   final Trip trip;
-
-  static const LatLng _fallbackCenter = LatLng(-6.2088, 106.8456); // Jakarta
 
   @override
   ConsumerState<TripDetailScreen> createState() => _TripDetailScreenState();
@@ -349,17 +348,7 @@ class _TripMap extends StatelessWidget {
     }
 
     if (allPoints.isEmpty) {
-      return Stack(
-        children: [
-          _BaseTiles(center: TripDetailScreen._fallbackCenter, cx: cx),
-          Container(
-            color: cx.canvas.withValues(alpha: 0.5),
-            alignment: Alignment.center,
-            child: Text('No track recorded for this trip',
-                style: TextStyle(color: cx.textDim)),
-          ),
-        ],
-      );
+      return const NoTrackNotice(subject: 'trip');
     }
 
     // Endpoints: first point of the first non-empty leg, last of the last.
@@ -431,30 +420,6 @@ class _TripMap extends StatelessWidget {
       );
 }
 
-class _BaseTiles extends StatelessWidget {
-  const _BaseTiles({required this.center, required this.cx});
-  final LatLng center;
-  final AppPalette cx;
-
-  @override
-  Widget build(BuildContext context) {
-    return FlutterMap(
-      options: MapOptions(
-        backgroundColor: cx.canvas,
-        initialCenter: center,
-        initialZoom: 12,
-      ),
-      children: [
-        TileLayer(
-          urlTemplate: basemapUrl(cx.isDark),
-          subdomains: const ['a', 'b', 'c', 'd'],
-          userAgentPackageName: 'id.co.opentrack.throttlepath',
-          tileProvider: NetworkTileProvider(silenceExceptions: true),
-        ),
-      ],
-    );
-  }
-}
 
 /// Combined trip stats — distance, elapsed vs moving time, avg/max — matching
 /// the ride-detail summary layout.
