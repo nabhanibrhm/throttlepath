@@ -516,7 +516,7 @@ once.
 
 | Item | Status | Reason |
 |------|--------|--------|
-| **F13 speed-based auto-pause** | **Push back** | The engine already has a *validated* signal-loss auto-pause + pause accounting (`tracking_service.dart:44-52`, `:321-333`), a Kalman anchor drop on resume, and a 3 km/h moving-time gate. A second auto-pause mechanism risks the accounting that fixed the train-blackout bug. If wanted, do it dead last, alone, with a real ride to verify. |
+| **F13 speed-based auto-pause** | **Rejected 2026-07-29** | The engine already has a *validated* signal-loss auto-pause + pause accounting (`tracking_service.dart:44-52`, `:321-333`), a Kalman anchor drop on resume, and a 3 km/h moving-time gate. A second auto-pause mechanism risks the accounting that fixed the train-blackout bug. Not doing it. |
 | **F9 satellite count + 4-bar meter** | Out of scope this round | geolocator's `Position` exposes **no** GNSS status. Needs the app's first native `EventChannel` over `LocationManager.registerGnssStatusCallback` (API 24+, fine on the API 28 test device). Possible, just not cheap. |
 | **F9 "usually takes ~20 s"** | **Impossible as specified** | Android has no time-to-first-fix API. Only fakeable with a locally-learned rolling average. Recommend dropping the line rather than inventing it. |
 | **F9 "Start anyway"** | Deferred | Means creating the `Ride` row before a usable fix. `beginRecording()` currently fires only after the first fix clears the 25 m accuracy gate — this touches the recording core. |
