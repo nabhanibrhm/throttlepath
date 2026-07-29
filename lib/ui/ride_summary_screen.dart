@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/duration_format.dart';
+import '../core/units.dart';
 import '../data/ride_stats.dart';
 import '../providers/settings_providers.dart';
 import '../providers/stats_providers.dart';
@@ -79,7 +81,7 @@ class _RideSummaryScreenState extends ConsumerState<RideSummaryScreen> {
         backgroundColor: cx.surfaceRaised,
         title: Text('Discard this ride?', style: TextStyle(color: cx.textBright)),
         content: Text(
-          'You recorded $distance over ${_fmtDuration(t.durationSeconds)}. '
+          'You recorded $distance over ${formatDuration(t.durationSeconds)}. '
           'Discarding deletes the ride and its track for good.',
           style: TextStyle(color: cx.textDim),
         ),
@@ -116,7 +118,7 @@ class _RideSummaryScreenState extends ConsumerState<RideSummaryScreen> {
         title: Text("Looks like this didn't go anywhere",
             style: TextStyle(color: cx.textBright)),
         content: Text(
-          '$distance in ${_fmtDuration(t.durationSeconds)}. '
+          '$distance in ${formatDuration(t.durationSeconds)}. '
           'Recordings this short are usually a mis-tap.',
           style: TextStyle(color: cx.textDim),
         ),
@@ -150,76 +152,28 @@ class _RideSummaryScreenState extends ConsumerState<RideSummaryScreen> {
     // trip, so the summary offers Continue-later / Finish-trip instead of a
     // plain save.
     final tripState = ref.watch(trackingControllerProvider);
-    final continuingTripId = tripState.continuingTripId;
-    final isTripStint = continuingTripId != null;
+    final isTripStint = tripState.continuingTripId != null;
     final tripName = tripState.continuingTripName?.trim();
-    final notifier = ref.read(trackingControllerProvider.notifier);
 
     // Context (places, route shape, records, name suggestions) arrives a beat
     // after the screen does; every part of the layout that uses it degrades to
     // nothing rather than to a spinner, so the stats never wait on a query.
     final insight = ref.watch(rideInsightProvider(t.rideId)).valueOrNull;
-    if (insight != null && !_prefilled) {
-      _prefilled = true;
-      // Straight assignment during build would notify the TextField's own
-      // listeners mid-frame; defer a frame instead.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _nameController.text.isEmpty) {
-          // setState, not a bare assignment: the suggestion chips filter out
-          // whatever is already in the field, so they have to be rebuilt too or
-          // the pre-filled name shows up twice.
-          setState(
-              () => _nameController.text = insight.nameSuggestions.first);
-        }
-      });
-    }
-    if (!_trivialPromptShown &&
-        (t.distanceMeters < _kTrivialDistanceMeters ||
-            t.durationSeconds < _kTrivialDurationSeconds)) {
-      _trivialPromptShown = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _promptTrivialRide();
-      });
-    }
+    _schedulePrefill(insight);
+    _scheduleTrivialPrompt(t);
 
     return PopScope(
       // Backing out keeps the (already-saved) ride, auto-named.
       canPop: !_busy,
       onPopInvokedWithResult: (didPop, _) {
-        if (didPop) {
-          ref.read(trackingControllerProvider.notifier).keepFinishedRide(
-                fallbackName: insight?.nameSuggestions.first,
-              );
-        }
+        if (!didPop) return;
+        ref.read(trackingControllerProvider.notifier).keepFinishedRide(
+              fallbackName: insight?.nameSuggestions.first,
+            );
       },
       child: Scaffold(
         backgroundColor: cx.canvas,
-        appBar: AppBar(
-          backgroundColor: cx.canvas,
-          automaticallyImplyLeading: false,
-          title: Text(
-            isTripStint ? 'STINT COMPLETE' : 'RIDE COMPLETE',
-            style: TextStyle(
-              color: cx.accentInk,
-              fontSize: 14,
-              letterSpacing: 3,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          actions: [
-            // Discard is deliberately out of the button stack: it was one slip
-            // away from Save, and it is not a peer of it (F15).
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: TextButton(
-                onPressed: _busy ? null : _discard,
-                style: TextButton.styleFrom(foregroundColor: cx.dangerInk),
-                child: const Text('Discard',
-                    style: TextStyle(fontWeight: FontWeight.w600)),
-              ),
-            ),
-          ],
-        ),
+        appBar: _appBar(cx, isTripStint: isTripStint),
         // Let the content scroll when the keyboard shrinks the viewport; the
         // buttons stay pinned to the bottom (via the Spacer) when there's room.
         body: SafeArea(
@@ -238,177 +192,14 @@ class _RideSummaryScreenState extends ConsumerState<RideSummaryScreen> {
                           _TripContextRow(tripName: tripName),
                           const SizedBox(height: 14),
                         ],
-                        if (insight != null && insight.awards.isNotEmpty) ...[
-                          _AwardRow(awards: insight.awards),
-                          const SizedBox(height: 16),
-                        ],
-                        // Where they went, before how far — the route is what
-                        // makes the ride recognisable a month later.
-                        if (PlaceRouteLabel.label(insight?.ride.startPlace,
-                                insight?.ride.endPlace) !=
-                            null) ...[
-                          PlaceRouteLabel(
-                            startPlace: insight?.ride.startPlace,
-                            endPlace: insight?.ride.endPlace,
-                            fontSize: 14,
-                          ),
-                          const SizedBox(height: 10),
-                        ],
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            Expanded(
-                              child: Row(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.baseline,
-                                textBaseline: TextBaseline.alphabetic,
-                                children: [
-                                  Text(
-                                    unit
-                                        .distanceMeters(t.distanceMeters)
-                                        .toStringAsFixed(2),
-                                    style: TextStyle(
-                                      color: cx.accentInk,
-                                      fontSize: 64,
-                                      height: 1,
-                                      fontWeight: FontWeight.w700,
-                                      fontFeatures: kTabularFigures,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Padding(
-                                    padding: const EdgeInsets.only(bottom: 8),
-                                    child: Text(
-                                      unit.distanceLabel,
-                                      style: TextStyle(
-                                        color: cx.textDim,
-                                        fontSize: 20,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            // Same floor as the History card: below it the trace
-                            // is drift, not a route.
-                            if (t.distanceMeters >= kRouteMinDistanceMeters &&
-                                RouteSparkline.canDraw(insight?.ride.routeBlob))
-                              SizedBox(
-                                width: 76,
-                                child: RouteSparkline(
-                                  blob: insight!.ride.routeBlob,
-                                  height: 56,
-                                ),
-                              ),
-                          ],
-                        ),
-                        if (insight != null) ...[
-                          const SizedBox(height: 10),
-                          _ComparisonLine(insight: insight),
-                        ],
+                        ..._headline(cx, t, unit, insight),
                         const SizedBox(height: 26),
-                        Row(
-                          children: [
-                            _SummaryStat(
-                              label: 'TOTAL TIME',
-                              value: _fmtDuration(t.durationSeconds),
-                            ),
-                            _SummaryStat(
-                              label: 'MOVING TIME',
-                              value: _fmtDuration(t.movingSeconds),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 20),
-                        Row(
-                          children: [
-                            _SummaryStat(
-                              label: 'AVG SPEED',
-                              value:
-                                  unit.speed(t.avgSpeedKmh).toStringAsFixed(1),
-                              unit: unit.speedLabel,
-                            ),
-                            _SummaryStat(
-                              label: 'PEAK SPEED',
-                              value:
-                                  unit.speed(t.maxSpeedKmh).toStringAsFixed(1),
-                              unit: unit.speedLabel,
-                              color: cx.peak,
-                            ),
-                          ],
-                        ),
+                        ..._statRows(cx, t, unit),
                         const Spacer(),
                         const SizedBox(height: 24),
-                        _NameSection(
-                          controller: _nameController,
-                          enabled: !_busy,
-                          label: isTripStint ? 'STINT NAME' : 'RIDE NAME',
-                          suggestions:
-                              insight?.nameSuggestions ?? const <String>[],
-                          onPick: (s) => setState(() {
-                            _nameController.text = s;
-                            _nameController.selection =
-                                TextSelection.collapsed(offset: s.length);
-                          }),
-                        ),
+                        _nameSection(insight, isTripStint: isTripStint),
                         const SizedBox(height: 16),
-                        // Primary action. Standalone ride → SAVE RIDE. A trip stint →
-                        // CONTINUE LATER (keep the journey open to add more stints).
-                        SizedBox(
-                          height: 60,
-                          child: ElevatedButton(
-                            onPressed: _busy
-                                ? null
-                                : () => _run(
-                                      isTripStint
-                                          ? (n) => notifier.saveAndContinueTrip(n)
-                                          : notifier.saveFinishedRide,
-                                    ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: cx.accent,
-                              foregroundColor: cx.onAccent,
-                              elevation: 0,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                            ),
-                            child: Text(
-                              isTripStint ? 'CONTINUE LATER' : 'SAVE RIDE',
-                              style: const TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        // Secondary action. Standalone ride → start a trip from this
-                        // ride (via a sheet that explains what one is). A trip stint →
-                        // finish the trip now.
-                        SizedBox(
-                          height: 52,
-                          child: OutlinedButton(
-                            onPressed: _busy
-                                ? null
-                                : (isTripStint
-                                    ? () => _run(notifier.finishTripWithStint)
-                                    : _startTrip),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: cx.accentInk,
-                              side: BorderSide(color: cx.accentInk),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                            ),
-                            child: Text(
-                              isTripStint ? 'FINISH TRIP' : 'CONTINUE AS A TRIP',
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                        ),
+                        ..._actions(cx, isTripStint: isTripStint),
                       ],
                     ),
                   ),
@@ -419,6 +210,226 @@ class _RideSummaryScreenState extends ConsumerState<RideSummaryScreen> {
         ),
       ),
     );
+  }
+
+  /// Pre-fills the name field from the first suggestion, once, when the insight
+  /// query lands.
+  ///
+  /// Deferred a frame because a straight assignment during build would notify the
+  /// TextField's own listeners mid-frame. It goes through `setState` rather than a
+  /// bare assignment because the suggestion chips filter out whatever is already
+  /// in the field — without a rebuild the pre-filled name shows up twice.
+  void _schedulePrefill(RideInsight? insight) {
+    if (insight == null || _prefilled) return;
+    _prefilled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _nameController.text.isNotEmpty) return;
+      setState(() => _nameController.text = insight.nameSuggestions.first);
+    });
+  }
+
+  /// Offers to bin a recording too short to be a ride — once per screen.
+  void _scheduleTrivialPrompt(LiveTelemetry t) {
+    if (_trivialPromptShown) return;
+    final trivial = t.distanceMeters < _kTrivialDistanceMeters ||
+        t.durationSeconds < _kTrivialDurationSeconds;
+    if (!trivial) return;
+    _trivialPromptShown = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _promptTrivialRide();
+    });
+  }
+
+  AppBar _appBar(AppPalette cx, {required bool isTripStint}) => AppBar(
+        backgroundColor: cx.canvas,
+        automaticallyImplyLeading: false,
+        title: Text(
+          isTripStint ? 'STINT COMPLETE' : 'RIDE COMPLETE',
+          style: TextStyle(
+            color: cx.accentInk,
+            fontSize: 14,
+            letterSpacing: 3,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        actions: [
+          // Discard is deliberately out of the button stack: it was one slip away
+          // from Save, and it is not a peer of it (F15).
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: TextButton(
+              onPressed: _busy ? null : _discard,
+              style: TextButton.styleFrom(foregroundColor: cx.dangerInk),
+              child: const Text('Discard',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+            ),
+          ),
+        ],
+      );
+
+  /// Awards, then where they went, then how far — the route is what makes a ride
+  /// recognisable a month later, so it comes before the distance.
+  List<Widget> _headline(
+    AppPalette cx,
+    LiveTelemetry t,
+    SpeedUnit unit,
+    RideInsight? insight,
+  ) {
+    final hasPlaces = PlaceRouteLabel.label(
+            insight?.ride.startPlace, insight?.ride.endPlace) !=
+        null;
+    return [
+      if (insight != null && insight.awards.isNotEmpty) ...[
+        _AwardRow(awards: insight.awards),
+        const SizedBox(height: 16),
+      ],
+      if (hasPlaces) ...[
+        PlaceRouteLabel(
+          startPlace: insight?.ride.startPlace,
+          endPlace: insight?.ride.endPlace,
+          fontSize: 14,
+        ),
+        const SizedBox(height: 10),
+      ],
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(child: _distanceHero(cx, t, unit)),
+          // Same floor as the History card: below it the trace is drift, not a
+          // route.
+          if (t.distanceMeters >= kRouteMinDistanceMeters &&
+              RouteSparkline.canDraw(insight?.ride.routeBlob))
+            SizedBox(
+              width: 76,
+              child: RouteSparkline(blob: insight!.ride.routeBlob, height: 56),
+            ),
+        ],
+      ),
+      if (insight != null) ...[
+        const SizedBox(height: 10),
+        _ComparisonLine(insight: insight),
+      ],
+    ];
+  }
+
+  Widget _distanceHero(AppPalette cx, LiveTelemetry t, SpeedUnit unit) => Row(
+        crossAxisAlignment: CrossAxisAlignment.baseline,
+        textBaseline: TextBaseline.alphabetic,
+        children: [
+          Text(
+            unit.distanceMeters(t.distanceMeters).toStringAsFixed(2),
+            style: TextStyle(
+              color: cx.accentInk,
+              fontSize: 64,
+              height: 1,
+              fontWeight: FontWeight.w700,
+              fontFeatures: kTabularFigures,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              unit.distanceLabel,
+              style: TextStyle(color: cx.textDim, fontSize: 20),
+            ),
+          ),
+        ],
+      );
+
+  List<Widget> _statRows(AppPalette cx, LiveTelemetry t, SpeedUnit unit) => [
+        Row(
+          children: [
+            _SummaryStat(
+              label: 'TOTAL TIME',
+              value: formatDuration(t.durationSeconds),
+            ),
+            _SummaryStat(
+              label: 'MOVING TIME',
+              value: formatDuration(t.movingSeconds),
+            ),
+          ],
+        ),
+        const SizedBox(height: 20),
+        Row(
+          children: [
+            _SummaryStat(
+              label: 'AVG SPEED',
+              value: unit.speed(t.avgSpeedKmh).toStringAsFixed(1),
+              unit: unit.speedLabel,
+            ),
+            _SummaryStat(
+              label: 'PEAK SPEED',
+              value: unit.speed(t.maxSpeedKmh).toStringAsFixed(1),
+              unit: unit.speedLabel,
+              color: cx.peak,
+            ),
+          ],
+        ),
+      ];
+
+  Widget _nameSection(RideInsight? insight, {required bool isTripStint}) =>
+      _NameSection(
+        controller: _nameController,
+        enabled: !_busy,
+        label: isTripStint ? 'STINT NAME' : 'RIDE NAME',
+        suggestions: insight?.nameSuggestions ?? const <String>[],
+        onPick: (s) => setState(() {
+          _nameController.text = s;
+          _nameController.selection = TextSelection.collapsed(offset: s.length);
+        }),
+      );
+
+  /// The two-button stack. A standalone ride saves or becomes a trip; a stint
+  /// keeps its trip open for the next one, or closes it now.
+  List<Widget> _actions(AppPalette cx, {required bool isTripStint}) {
+    final notifier = ref.read(trackingControllerProvider.notifier);
+    return [
+      SizedBox(
+        height: 60,
+        child: ElevatedButton(
+          onPressed: _busy
+              ? null
+              : () => _run(isTripStint
+                  ? (n) => notifier.saveAndContinueTrip(n)
+                  : notifier.saveFinishedRide),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: cx.accent,
+            foregroundColor: cx.onAccent,
+            elevation: 0,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          ),
+          child: Text(
+            isTripStint ? 'CONTINUE LATER' : 'SAVE RIDE',
+            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+          ),
+        ),
+      ),
+      const SizedBox(height: 10),
+      SizedBox(
+        height: 52,
+        child: OutlinedButton(
+          onPressed: _busy
+              ? null
+              : (isTripStint
+                  ? () => _run(notifier.finishTripWithStint)
+                  // Explained in a sheet first — "trip" is the app's word, not a
+                  // word the rider already knows.
+                  : _startTrip),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: cx.accentInk,
+            side: BorderSide(color: cx.accentInk),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          ),
+          child: Text(
+            isTripStint ? 'FINISH TRIP' : 'CONTINUE AS A TRIP',
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+          ),
+        ),
+      ),
+    ];
   }
 
   /// Turns this ride into the first stint of a trip. The trip-name field lives in
@@ -847,15 +858,6 @@ class _RoundedField extends StatelessWidget {
   }
 }
 
-/// Formats seconds as `m:ss` (or `h:mm:ss` past an hour).
-String _fmtDuration(int seconds) {
-  final h = seconds ~/ 3600;
-  final m = (seconds % 3600) ~/ 60;
-  final s = seconds % 60;
-  final mm = m.toString().padLeft(2, '0');
-  final ss = s.toString().padLeft(2, '0');
-  return h > 0 ? '$h:$mm:$ss' : '$mm:$ss';
-}
 
 class _SummaryStat extends StatelessWidget {
   const _SummaryStat({

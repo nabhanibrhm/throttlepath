@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/date_format.dart';
+import '../core/duration_format.dart';
 import '../core/geo.dart';
 import '../core/lean.dart';
 import '../core/smoothness.dart';
@@ -293,11 +295,11 @@ class _SummaryPanel extends StatelessWidget {
             children: [
               _Stat(
                 label: 'TOTAL TIME',
-                value: _fmtDuration(ride.durationSeconds),
+                value: formatDuration(ride.durationSeconds),
               ),
               _Stat(
                 label: 'MOVING TIME',
-                value: _fmtDuration(ride.movingSeconds),
+                value: formatDuration(ride.movingSeconds),
               ),
             ],
           ),
@@ -704,23 +706,9 @@ class _Stat extends StatelessWidget {
   }
 }
 
-const _months = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', //
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-];
-
 String _formatDate(DateTime dt) {
   final local = dt.toLocal();
   final hh = local.hour.toString().padLeft(2, '0');
   final mm = local.minute.toString().padLeft(2, '0');
-  return '${_months[local.month - 1]} ${local.day}, ${local.year} · $hh:$mm';
-}
-
-String _fmtDuration(int seconds) {
-  final h = seconds ~/ 3600;
-  final m = (seconds % 3600) ~/ 60;
-  final s = seconds % 60;
-  final mm = m.toString().padLeft(2, '0');
-  final ss = s.toString().padLeft(2, '0');
-  return h > 0 ? '$h:$mm:$ss' : '$mm:$ss';
+  return '${shortMonth(local.month)} ${local.day}, ${local.year} · $hh:$mm';
 }

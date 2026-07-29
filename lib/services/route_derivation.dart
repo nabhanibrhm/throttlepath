@@ -74,36 +74,30 @@ double? deriveSmoothness(List<TrackPoint> points) =>
       leanPeak: null
     );
   }
-  final first = points.first;
-  final last = points.last;
-  final blob = encodeRouteBlob([
-    for (final p in points) (lat: p.latitude, lon: p.longitude),
-  ]);
-  final smoothness = deriveSmoothness(points);
-  // Lean, like smoothness, is a claim about *how* you rode rather than *where*,
-  // so it is not gated behind the route-distance floor below.
+  // Smoothness and lean are claims about *how* you rode rather than *where*, so
+  // neither is gated behind the route-distance floor that nulls the key.
   final lean = deriveLean(points);
-  if (ride.totalDistanceMeters < kRouteMinDistanceMeters) {
-    return (
-      key: null,
-      blob: blob,
-      smoothness: smoothness,
-      leanP95: lean.p95,
-      leanPeak: lean.peak,
-    );
-  }
   return (
-    key: buildRouteKey(
-      startTime: ride.startTime,
-      startLat: first.latitude,
-      startLon: first.longitude,
-      endLat: last.latitude,
-      endLon: last.longitude,
-    ),
-    blob: blob,
-    smoothness: smoothness,
+    key: _routeKeyFor(ride, points),
+    blob: encodeRouteBlob([
+      for (final p in points) (lat: p.latitude, lon: p.longitude),
+    ]),
+    smoothness: deriveSmoothness(points),
     leanP95: lean.p95,
     leanPeak: lean.peak,
+  );
+}
+
+/// The ride's route key, or null when it never travelled far enough to have gone
+/// anywhere at all — see [kRouteMinDistanceMeters].
+String? _routeKeyFor(Ride ride, List<TrackPoint> points) {
+  if (ride.totalDistanceMeters < kRouteMinDistanceMeters) return null;
+  return buildRouteKey(
+    startTime: ride.startTime,
+    startLat: points.first.latitude,
+    startLon: points.first.longitude,
+    endLat: points.last.latitude,
+    endLon: points.last.longitude,
   );
 }
 

@@ -4,6 +4,7 @@ import 'dart:ui' show DartPluginRegistrant;
 
 import 'package:flutter_background_service/flutter_background_service.dart';
 
+import '../core/duration_format.dart';
 import '../core/geo.dart';
 import '../core/gps_kalman.dart';
 import '../core/lean.dart';
@@ -402,6 +403,29 @@ Future<void> onStart(ServiceInstance service) async {
     return d > 0 ? (totalDistanceMeters / d) * 3.6 : 0.0;
   }
 
+  // Drops every smoothed and windowed estimate so the next fix re-seeds from
+  // scratch. Called on begin, on pause, and after either re-anchor: carrying a
+  // position or heading discontinuity across one of those would fabricate a
+  // straight-line segment or a turn that was never ridden.
+  void dropSmoothingState() {
+    kalman.reset();
+    smoothLat = null;
+    smoothLon = null;
+    recentFixes.clear();
+    recentHeadings.clear();
+    currentLeanDegrees = null;
+  }
+
+  // Banks an in-progress blackout's frozen interval into totalPaused so it stays
+  // out of duration/avg, then clears the marker. Idempotent, so the manual-pause
+  // and re-anchor paths can both call it without double-counting.
+  void bankSignalLoss(DateTime now) {
+    final lostAt = signalLostAt;
+    if (lostAt == null) return;
+    totalPaused += now.difference(lostAt);
+    signalLostAt = null;
+  }
+
   void emitTelemetry() {
     service.invoke('telemetry', {
       'rideId': rideId,
@@ -507,17 +531,10 @@ Future<void> onStart(ServiceInstance service) async {
       maxSpeedKmh = 0;
       currentSpeedKmh = 0;
       speedAtLastFix = 0;
-      recentFixes.clear();
-      // A heading discontinuity here would fabricate a turn, so the live
-      // lean window resets alongside the position window.
-      recentHeadings.clear();
-      currentLeanDegrees = null;
       movingSeconds = 0;
       pointCount = 0;
       rejectedStreak = 0;
-      kalman.reset();
-      smoothLat = null;
-      smoothLon = null;
+      dropSmoothingState();
       lastLat = null;
       lastLon = null;
       lastFixAt = now;
@@ -618,34 +635,24 @@ Future<void> onStart(ServiceInstance service) async {
     // right away when the paused state or lifecycle phase changes.
     if (service is AndroidServiceInstance) {
       ticksSinceNotify++;
-      final pausedChanged = lastNotifiedPaused != paused;
-      final phaseChanged = lastNotifiedPhase != phase;
-      if (ticksSinceNotify >= _kNotificationThrottleSeconds ||
-          pausedChanged ||
-          phaseChanged) {
+      // Refresh on the throttle, or immediately when the paused state or
+      // lifecycle phase flips, so pause/resume shows promptly.
+      final stateChanged =
+          lastNotifiedPaused != paused || lastNotifiedPhase != phase;
+      if (ticksSinceNotify >= _kNotificationThrottleSeconds || stateChanged) {
         ticksSinceNotify = 0;
         lastNotifiedPaused = paused;
         lastNotifiedPhase = phase;
-        final String title;
-        final String content;
-        if (phase == 'acquiring') {
-          title = 'ThrottlePath — acquiring GPS…';
-          content = 'Waiting for a GPS signal';
-        } else if (phase == 'countdown') {
-          title = 'ThrottlePath — starting…';
-          content = 'Ride begins in $countdown';
-        } else if (signalLostAt != null) {
-          title = 'ThrottlePath — GPS signal lost';
-          content = 'Clock paused · '
-              '${(totalDistanceMeters / 1000).toStringAsFixed(2)} km · '
-              '${_formatDuration(elapsedSeconds())}';
-        } else {
-          title = paused ? 'ThrottlePath — paused' : 'ThrottlePath — recording';
-          content = '${(totalDistanceMeters / 1000).toStringAsFixed(2)} km · '
-              '${_formatDuration(elapsedSeconds())}';
-        }
+        final text = _notificationText(
+          phase: phase,
+          countdown: countdown,
+          signalLost: signalLostAt != null,
+          paused: paused,
+          distanceMeters: totalDistanceMeters,
+          elapsedSeconds: elapsedSeconds(),
+        );
         await service.setForegroundNotificationInfo(
-            title: title, content: content);
+            title: text.title, content: text.content);
       }
     }
   });
@@ -705,21 +712,11 @@ Future<void> onStart(ServiceInstance service) async {
         lastLat = fix.latitude;
         lastLon = fix.longitude;
         lastFixAt = now;
-        kalman.reset();
-        smoothLat = null;
-        smoothLon = null;
-        recentFixes.clear();
-        // A heading discontinuity here would fabricate a turn, so the live
-        // lean window resets alongside the position window.
-        recentHeadings.clear();
-        currentLeanDegrees = null;
+        dropSmoothingState();
         rejectedStreak = 0;
         // A blackout that ended with a far jump — bank the frozen time so it
         // stays out of duration/avg.
-        if (signalLostAt != null) {
-          totalPaused += now.difference(signalLostAt!);
-          signalLostAt = null;
-        }
+        bankSignalLoss(now);
         return;
       }
       rejectedStreak = 0;
@@ -735,18 +732,8 @@ Future<void> onStart(ServiceInstance service) async {
       // smoothed anchor makes the distance step below skip this segment — a
       // straight line across a tunnel is phantom, not ridden.
       if (longGap) {
-        kalman.reset();
-        smoothLat = null;
-        smoothLon = null;
-        recentFixes.clear();
-        // A heading discontinuity here would fabricate a turn, so the live
-        // lean window resets alongside the position window.
-        recentHeadings.clear();
-        currentLeanDegrees = null;
-        if (signalLostAt != null) {
-          totalPaused += now.difference(signalLostAt!);
-          signalLostAt = null;
-        }
+        dropSmoothingState();
+        bankSignalLoss(now);
       }
 
       // Feed the Kalman filter. Fuse the Doppler velocity only when moving fast
@@ -795,60 +782,27 @@ Future<void> onStart(ServiceInstance service) async {
       // stationary (it accrues along the smoothed track), so this only corrects
       // the displayed/peak speed and keeps moving-time from ticking at a stop.
       recentFixes.add((now, sLat, sLon));
-      while (recentFixes.length > 1 &&
-          now.difference(recentFixes.first.$1).inMilliseconds / 1000.0 >
-              _kStationaryWindowSeconds) {
-        recentFixes.removeAt(0);
-      }
-      if (recentFixes.length >= 2) {
-        final oldest = recentFixes.first;
-        final spanS = now.difference(oldest.$1).inMilliseconds / 1000.0;
-        if (spanS >= _kStationaryWindowSeconds * 0.6) {
-          final netM = haversineMeters(oldest.$2, oldest.$3, sLat, sLon);
-          if ((netM / spanS) * 3.6 < _kStationarySpeedKmh) currentSpeedKmh = 0.0;
-        }
+      _trimWindow(
+          recentFixes, (f) => f.$1, now, _kStationaryWindowSeconds);
+      if (_isWindowedStandstill(recentFixes, now, sLat, sLon)) {
+        currentSpeedKmh = 0.0;
       }
 
       speedAtLastFix = currentSpeedKmh;
       if (currentSpeedKmh > maxSpeedKmh) maxSpeedKmh = currentSpeedKmh;
 
-      // Live lean estimate, for the Record screen's lean backdrop.
-      //
-      // Uses the *filter's* heading rather than the fix's own course: the velocity
-      // vector is already smoothed, which is what makes a per-fix estimate steady
-      // enough to point a needle at. Same physics and the same speed floor as the
-      // offline analysis, and it borrows `signedTurnDegrees` from `core/lean.dart`
-      // rather than restating the wraparound rule — a 359°→1° crossing must read as
-      // a 2° correction in both places or the live dial and the saved chart would
-      // disagree about the same corner.
-      //
-      // This is honestly a soft number: it lags by the window, and a rider cannot
-      // look at a phone mid-corner anyway. It is for the pillion and for watching
-      // a replay, which is why nothing depends on it.
+      // Live lean estimate, for the Record screen's lean backdrop. Honestly a soft
+      // number — it lags by the window, and a rider cannot look at a phone
+      // mid-corner anyway. It is for the pillion and for watching a replay, which
+      // is why nothing depends on it.
       recentHeadings.add((now, kalman.headingDegrees));
-      while (recentHeadings.length > 1 &&
-          now.difference(recentHeadings.first.$1).inMilliseconds / 1000.0 >
-              _kLeanWindowSeconds) {
-        recentHeadings.removeAt(0);
-      }
-      currentLeanDegrees = null;
-      if (currentSpeedKmh >= kMinLeanSpeedKmh && recentHeadings.length >= 2) {
-        final oldest = recentHeadings.first;
-        final spanS = now.difference(oldest.$1).inMilliseconds / 1000.0;
-        // Needs most of the window before it means anything, or the first two fixes
-        // after a reset would swing the needle on a 1-second baseline.
-        if (spanS >= _kLeanWindowSeconds * 0.6) {
-          final omega = signedTurnDegrees(oldest.$2, kalman.headingDegrees) *
-              (math.pi / 180.0) /
-              spanS;
-          final vMps = currentSpeedKmh / 3.6;
-          final magnitude =
-              math.atan((vMps * omega.abs()) / kGravity) * 180.0 / math.pi;
-          if (magnitude <= kMaxPlausibleLeanDegrees) {
-            currentLeanDegrees = omega < 0 ? -magnitude : magnitude;
-          }
-        }
-      }
+      _trimWindow(recentHeadings, (h) => h.$1, now, _kLeanWindowSeconds);
+      currentLeanDegrees = _liveLeanDegrees(
+        recentHeadings: recentHeadings,
+        now: now,
+        headingDegrees: kalman.headingDegrees,
+        speedKmh: currentSpeedKmh,
+      );
 
       // Persist the raw fix as the ground-truth track point. The heading is kept
       // as reported (not the `useDoppler` variant fused above) because the lean
@@ -899,29 +853,20 @@ Future<void> onStart(ServiceInstance service) async {
   // covered while paused is not counted when tracking resumes.
   service.on('pause').listen((_) {
     if (phase != 'recording' || paused) return;
+    final now = DateTime.now();
     // If a blackout was in progress, bank its frozen time before the manual
     // pause takes over, so the two freezes can't double-count.
-    if (signalLostAt != null) {
-      totalPaused += DateTime.now().difference(signalLostAt!);
-      signalLostAt = null;
-    }
+    bankSignalLoss(now);
     paused = true;
-    pauseStartedAt = DateTime.now();
+    pauseStartedAt = now;
     currentSpeedKmh = 0.0;
-    recentFixes.clear();
-    // A heading discontinuity here would fabricate a turn, so the live
-    // lean window resets alongside the position window.
-    recentHeadings.clear();
-    currentLeanDegrees = null;
     positionSub?.cancel();
     positionSub = null;
     lastLat = null;
     lastLon = null;
     // Drop the filter/anchor so distance covered while paused isn't counted and
     // the estimate re-seeds cleanly from the first fix after resume.
-    kalman.reset();
-    smoothLat = null;
-    smoothLon = null;
+    dropSmoothingState();
     emitTelemetry();
   });
 
@@ -939,12 +884,107 @@ Future<void> onStart(ServiceInstance service) async {
   });
 }
 
-/// Formats seconds as `m:ss` (or `h:mm:ss` past an hour) for the notification.
-String _formatDuration(int seconds) {
-  final h = seconds ~/ 3600;
-  final m = (seconds % 3600) ~/ 60;
-  final s = seconds % 60;
-  final mm = m.toString().padLeft(2, '0');
-  final ss = s.toString().padLeft(2, '0');
-  return h > 0 ? '$h:$mm:$ss' : '$mm:$ss';
+/// The foreground notification's title and body for the engine's current state.
+///
+/// Pure, so the four branches can be read (and tested) without standing up a
+/// service isolate. A blackout deliberately reads as "clock paused" rather than
+/// an error: the clock really has frozen, and a rider who isn't told reads the
+/// stalled timer as a bug.
+({String title, String content}) _notificationText({
+  required String phase,
+  required int countdown,
+  required bool signalLost,
+  required bool paused,
+  required double distanceMeters,
+  required int elapsedSeconds,
+}) {
+  if (phase == 'acquiring') {
+    return (
+      title: 'ThrottlePath — acquiring GPS…',
+      content: 'Waiting for a GPS signal',
+    );
+  }
+  if (phase == 'countdown') {
+    return (
+      title: 'ThrottlePath — starting…',
+      content: 'Ride begins in $countdown',
+    );
+  }
+  final progress = '${(distanceMeters / 1000).toStringAsFixed(2)} km · '
+      '${formatDuration(elapsedSeconds)}';
+  if (signalLost) {
+    return (
+      title: 'ThrottlePath — GPS signal lost',
+      content: 'Clock paused · $progress',
+    );
+  }
+  return (
+    title: paused ? 'ThrottlePath — paused' : 'ThrottlePath — recording',
+    content: progress,
+  );
+}
+
+/// Whether net ground displacement across the recent fix window implies a
+/// standstill — i.e. the reported speed is GPS "creep", not real motion.
+///
+/// Works off positions rather than the reported speed, so it hardens whichever
+/// pipeline feeds it. Requires most of the window before answering, or the first
+/// two fixes after a reset would decide on a one-second baseline.
+bool _isWindowedStandstill(
+  List<(DateTime, double, double)> recentFixes,
+  DateTime now,
+  double lat,
+  double lon,
+) {
+  if (recentFixes.length < 2) return false;
+  final oldest = recentFixes.first;
+  final spanSeconds = now.difference(oldest.$1).inMilliseconds / 1000.0;
+  if (spanSeconds < _kStationaryWindowSeconds * 0.6) return false;
+  final netMeters = haversineMeters(oldest.$2, oldest.$3, lat, lon);
+  return (netMeters / spanSeconds) * 3.6 < _kStationarySpeedKmh;
+}
+
+/// The live lean estimate for the Record screen's backdrop, or null when there is
+/// nothing honest to show (too slow, window too short, or physically implausible).
+///
+/// Takes the *filter's* smoothed heading rather than a fix's own course: the
+/// velocity vector is already smoothed, which is what makes a per-fix estimate
+/// steady enough to point a needle at. Same physics and speed floor as the offline
+/// analysis, and it borrows [signedTurnDegrees] rather than restating the
+/// wraparound rule — a 359°→1° crossing must read as a 2° correction here and in
+/// the saved chart, or the two disagree about the same corner.
+double? _liveLeanDegrees({
+  required List<(DateTime, double)> recentHeadings,
+  required DateTime now,
+  required double headingDegrees,
+  required double speedKmh,
+}) {
+  if (speedKmh < kMinLeanSpeedKmh || recentHeadings.length < 2) return null;
+  final oldest = recentHeadings.first;
+  final spanSeconds = now.difference(oldest.$1).inMilliseconds / 1000.0;
+  if (spanSeconds < _kLeanWindowSeconds * 0.6) return null;
+
+  final omega = signedTurnDegrees(oldest.$2, headingDegrees) *
+      (math.pi / 180.0) /
+      spanSeconds;
+  final vMps = speedKmh / 3.6;
+  final magnitude =
+      math.atan((vMps * omega.abs()) / kGravity) * 180.0 / math.pi;
+  if (magnitude > kMaxPlausibleLeanDegrees) return null;
+  return omega < 0 ? -magnitude : magnitude;
+}
+
+/// Drops entries older than [windowSeconds] from a rolling window, always keeping
+/// the newest so a long gap can never empty it.
+void _trimWindow<T>(
+  List<T> window,
+  DateTime Function(T) timeOf,
+  DateTime now,
+  double windowSeconds,
+) {
+  while (window.length > 1 &&
+      now.difference(timeOf(window.first)).inMilliseconds / 1000.0 >
+          windowSeconds) {
+    window.removeAt(0);
+  }
 }

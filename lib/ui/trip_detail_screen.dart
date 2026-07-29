@@ -3,6 +3,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../core/duration_format.dart';
 import '../core/units.dart';
 import '../data/database_service.dart';
 import '../data/models/ride.dart';
@@ -442,8 +443,8 @@ class _TripSummaryPanel extends StatelessWidget {
           const SizedBox(height: 28),
           Row(
             children: [
-              _Stat(label: 'TOTAL TIME', value: _fmtDuration(stats.durationSeconds)),
-              _Stat(label: 'MOVING TIME', value: _fmtDuration(stats.movingSeconds)),
+              _Stat(label: 'TOTAL TIME', value: formatDuration(stats.durationSeconds)),
+              _Stat(label: 'MOVING TIME', value: formatDuration(stats.movingSeconds)),
             ],
           ),
           const SizedBox(height: 20),
@@ -587,7 +588,7 @@ class _StintRow extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '${_fmtDuration(stint.durationSeconds)} · '
+                      '${formatDuration(stint.durationSeconds)} · '
                       '${unit.speed(stint.averageSpeedKmh).toStringAsFixed(0)} '
                       '${unit.speedLabel} avg',
                       style: TextStyle(color: cx.textDim, fontSize: 12),
@@ -688,11 +689,3 @@ class _Stat extends StatelessWidget {
   }
 }
 
-String _fmtDuration(int seconds) {
-  final h = seconds ~/ 3600;
-  final m = (seconds % 3600) ~/ 60;
-  final s = seconds % 60;
-  final mm = m.toString().padLeft(2, '0');
-  final ss = s.toString().padLeft(2, '0');
-  return h > 0 ? '$h:$mm:$ss' : '$mm:$ss';
-}

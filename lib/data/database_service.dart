@@ -43,6 +43,35 @@ class DatabaseService {
     return db;
   }
 
+  // --- Mutation helpers ----------------------------------------------------
+
+  /// Loads [rideId], applies [change], and writes it back, all in one write
+  /// transaction.
+  ///
+  /// Silently does nothing when the row is already gone. Every mutation below
+  /// races History's swipe-to-delete (which holds the delete for 6s but then
+  /// really does commit it), so "the ride vanished underneath me" is ordinary
+  /// operation here, not an error worth propagating to a caller who has nothing
+  /// useful to do about it.
+  Future<void> _updateRide(int rideId, void Function(Ride ride) change) {
+    return isar.writeTxn(() async {
+      final ride = await isar.rides.get(rideId);
+      if (ride == null) return;
+      change(ride);
+      await isar.rides.put(ride);
+    });
+  }
+
+  /// [Trip] counterpart of [_updateRide], with the same deleted-row contract.
+  Future<void> _updateTrip(int tripId, void Function(Trip trip) change) {
+    return isar.writeTxn(() async {
+      final trip = await isar.trips.get(tripId);
+      if (trip == null) return;
+      change(trip);
+      await isar.trips.put(trip);
+    });
+  }
+
   // --- Ride helpers --------------------------------------------------------
 
   /// Inserts a new ride (or updates an existing one) and returns its id.
@@ -93,34 +122,23 @@ class DatabaseService {
   }
 
   /// Sets the user-given [name] on an existing ride (from the summary screen).
-  /// No-op if the ride was already deleted.
-  Future<void> setRideName(int rideId, String name) {
-    return isar.writeTxn(() async {
-      final ride = await isar.rides.get(rideId);
-      if (ride == null) return;
-      ride.name = name;
-      await isar.rides.put(ride);
-    });
-  }
+  Future<void> setRideName(int rideId, String name) =>
+      _updateRide(rideId, (ride) => ride.name = name);
 
   /// Sets reverse-geocoded start/end place names on a ride (best-effort — either
-  /// may be null). No-op if the ride was deleted before geocoding finished.
+  /// may be null).
   Future<void> setRidePlaces(int rideId,
       {String? startPlace, String? endPlace}) {
-    return isar.writeTxn(() async {
-      final ride = await isar.rides.get(rideId);
-      if (ride == null) return;
+    return _updateRide(rideId, (ride) {
       ride.startPlace = startPlace;
       ride.endPlace = endPlace;
-      await isar.rides.put(ride);
     });
   }
 
   /// Stores the fields derived from a ride's track — route identity + shape
   /// (see `route_key.dart` / `route_blob.dart`) and its smoothness score (see
   /// `smoothness.dart`). Written once when the ride finalises, and by the
-  /// backfill for rides recorded before these fields existed. No-op if the ride
-  /// was deleted in between.
+  /// backfill for rides recorded before these fields existed.
   Future<void> setRideDerived(
     int rideId, {
     String? routeKey,
@@ -129,15 +147,12 @@ class DatabaseService {
     double? leanP95Degrees,
     double? leanPeakDegrees,
   }) {
-    return isar.writeTxn(() async {
-      final ride = await isar.rides.get(rideId);
-      if (ride == null) return;
+    return _updateRide(rideId, (ride) {
       ride.routeKey = routeKey;
       ride.routeBlob = routeBlob;
       ride.smoothness = smoothness;
       ride.leanP95Degrees = leanP95Degrees;
       ride.leanPeakDegrees = leanPeakDegrees;
-      await isar.rides.put(ride);
     });
   }
 
@@ -297,15 +312,9 @@ class DatabaseService {
   Future<Trip?> getTripById(int id) => isar.trips.get(id);
 
   /// Renames a trip. A trip's name is its own — independent of its stints' names —
-  /// so this never touches the stints. No-op if the trip was deleted.
-  Future<void> setTripName(int tripId, String name) {
-    return isar.writeTxn(() async {
-      final trip = await isar.trips.get(tripId);
-      if (trip == null) return;
-      trip.name = name;
-      await isar.trips.put(trip);
-    });
-  }
+  /// so this never touches the stints.
+  Future<void> setTripName(int tripId, String name) =>
+      _updateTrip(tripId, (trip) => trip.name = name);
 
   /// All trips, newest first.
   Future<List<Trip>> getAllTrips() {
@@ -341,38 +350,19 @@ class DatabaseService {
         .findAll();
   }
 
-  /// Links (or unlinks, with null) a ride to a trip as one of its stints. No-op if
-  /// the ride was deleted before this ran.
-  Future<void> setRideTrip(int rideId, int? tripId) {
-    return isar.writeTxn(() async {
-      final ride = await isar.rides.get(rideId);
-      if (ride == null) return;
-      ride.tripId = tripId;
-      await isar.rides.put(ride);
-    });
-  }
+  /// Links (or unlinks, with null) a ride to a trip as one of its stints.
+  Future<void> setRideTrip(int rideId, int? tripId) =>
+      _updateRide(rideId, (ride) => ride.tripId = tripId);
 
   /// Closes a trip (stamps [Trip.finishedAt]); it no longer accepts new stints
-  /// until reopened. No-op if the trip was deleted.
-  Future<void> finishTrip(int tripId, {DateTime? finishedAt}) {
-    return isar.writeTxn(() async {
-      final trip = await isar.trips.get(tripId);
-      if (trip == null) return;
-      trip.finishedAt = finishedAt ?? DateTime.now();
-      await isar.trips.put(trip);
-    });
-  }
+  /// until reopened.
+  Future<void> finishTrip(int tripId, {DateTime? finishedAt}) => _updateTrip(
+      tripId, (trip) => trip.finishedAt = finishedAt ?? DateTime.now());
 
   /// Reopens a finished trip (clears [Trip.finishedAt]) so more stints can be
-  /// added. No-op if the trip was deleted.
-  Future<void> reopenTrip(int tripId) {
-    return isar.writeTxn(() async {
-      final trip = await isar.trips.get(tripId);
-      if (trip == null) return;
-      trip.finishedAt = null;
-      await isar.trips.put(trip);
-    });
-  }
+  /// added.
+  Future<void> reopenTrip(int tripId) =>
+      _updateTrip(tripId, (trip) => trip.finishedAt = null);
 
   // --- TrackPoint helpers --------------------------------------------------
 

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/date_format.dart';
+import '../core/duration_format.dart';
 import '../core/units.dart';
 import '../data/database_service.dart';
 import '../data/models/ride.dart';
@@ -52,6 +54,28 @@ enum _Filter {
   const _Filter(this.label);
   final String label;
 }
+
+/// One month's worth of list entries, with the header total.
+typedef _MonthGroup = ({String label, double meters, List<_Entry> entries});
+
+/// Everything the History list derives from the raw rides + trips for one build.
+typedef _ListModel = ({
+  /// Rides and finished trips merged and sorted newest-first, before searching.
+  List<_Entry> all,
+
+  /// The lower-cased search text, also handed to the cards so they can highlight
+  /// the matched substring.
+  String query,
+
+  /// What survives both the search and the selected filter chip.
+  List<_Entry> visible,
+  List<_MonthGroup> groups,
+  Map<_Filter, int> counts,
+
+  /// Whether a search or a non-`all` chip is narrowing the list — decides whether
+  /// the running-total line is worth showing.
+  bool filtering,
+});
 
 class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   final TextEditingController _search = TextEditingController();
@@ -158,42 +182,9 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     final openTrips = ref.watch(openTripsProvider).valueOrNull ?? const [];
     final finishedTrips =
         ref.watch(finishedTripsProvider).valueOrNull ?? const [];
+    final model = _derive(rides, finishedTrips);
 
-    void continueTrip(TripSummary t) {
-      ref
-          .read(trackingControllerProvider.notifier)
-          .beginContinuation(t.trip.id, t.trip.name);
-      ref.read(homeTabProvider.notifier).state = 0; // Record tab
-    }
-
-    void openTrip(TripSummary t) => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => TripDetailScreen(trip: t.trip)),
-        );
-
-    void openRide(Ride r) => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => RideDetailScreen(ride: r)),
-        );
-
-    final all = <_Entry>[
-      for (final t in finishedTrips) _TripEntry(t),
-      for (final r in rides)
-        if (!_pendingDelete.contains(r.id)) _RideEntry(r),
-    ]..sort((a, b) => b.when.compareTo(a.when));
-
-    final query = _search.text.trim().toLowerCase();
-    final matched = query.isEmpty
-        ? all
-        : all.where((e) => e.matches(query)).toList(growable: false);
-    // Counts are over the *searched* set, not the whole history — a chip reading
-    // "Trips 3" that yields nothing once tapped is worse than no count.
-    final counts = {
-      for (final f in _Filter.values) f: matched.where(f.accepts).length,
-    };
-    final visible = matched.where(_filter.accepts).toList(growable: false);
-    final groups = _groupByMonth(visible);
-    final filtering = query.isNotEmpty || _filter != _Filter.all;
-
-    if (all.isEmpty && openTrips.isEmpty) {
+    if (model.all.isEmpty && openTrips.isEmpty) {
       return CustomScrollView(
         slivers: [
           _appBar(cx, week, unit),
@@ -224,16 +215,16 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
             child: _FilterRow(
               selected: _filter,
-              counts: counts,
+              counts: model.counts,
               onSelect: (f) => setState(() => _filter = f),
             ),
           ),
         ),
-        if (filtering)
+        if (model.filtering)
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              child: _ResultLine(entries: visible, unit: unit),
+              child: _ResultLine(entries: model.visible, unit: unit),
             ),
           ),
         for (final t in openTrips)
@@ -243,17 +234,17 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
               child: _OpenTripCard(
                 summary: t,
                 unit: unit,
-                onContinue: () => continueTrip(t),
-                onTap: () => openTrip(t),
+                onContinue: () => _continueTrip(t),
+                onTap: () => _openTrip(t),
               ),
             ),
           ),
-        if (visible.isEmpty)
+        if (model.visible.isEmpty)
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 40, 16, 40),
               child: Text(
-                query.isEmpty
+                model.query.isEmpty
                     ? 'Nothing filed under ${_filter.label.toLowerCase()}.'
                     : 'No rides match “${_search.text.trim()}”.',
                 textAlign: TextAlign.center,
@@ -261,7 +252,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
               ),
             ),
           ),
-        for (final group in groups)
+        for (final group in model.groups)
           SliverList(
             delegate: SliverChildListDelegate([
               _MonthHeader(
@@ -272,22 +263,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
               for (final entry in group.entries)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                  child: switch (entry) {
-                    _RideEntry(:final ride) => _RideCard(
-                        ride: ride,
-                        unit: unit,
-                        query: query,
-                        onTap: () => openRide(ride),
-                        onDelete: () => _deleteWithUndo(ride),
-                      ),
-                    _TripEntry(:final summary) => _TripCard(
-                        summary: summary,
-                        unit: unit,
-                        query: query,
-                        onTap: () => openTrip(summary),
-                        onOpenStint: openRide,
-                      ),
-                  },
+                  child: _entryCard(entry, unit, model.query),
                 ),
             ]),
           ),
@@ -295,6 +271,74 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
       ],
     );
   }
+
+  /// Everything the list derives from the raw rides + trips: the merged and
+  /// date-sorted entries, what survives the search and the filter chip, and the
+  /// per-chip counts.
+  ///
+  /// Re-run on every keystroke (search calls `setState`), so it is deliberately
+  /// one pass per stage over an entry count in the hundreds — not the track-point
+  /// scale where that would matter.
+  _ListModel _derive(List<Ride> rides, List<TripSummary> finishedTrips) {
+    final all = <_Entry>[
+      for (final t in finishedTrips) _TripEntry(t),
+      for (final r in rides)
+        if (!_pendingDelete.contains(r.id)) _RideEntry(r),
+    ]..sort((a, b) => b.when.compareTo(a.when));
+
+    final query = _search.text.trim().toLowerCase();
+    final matched = query.isEmpty
+        ? all
+        : all.where((e) => e.matches(query)).toList(growable: false);
+    final visible = matched.where(_filter.accepts).toList(growable: false);
+
+    return (
+      all: all,
+      query: query,
+      visible: visible,
+      groups: _groupByMonth(visible),
+      // Counts are over the *searched* set, not the whole history — a chip
+      // reading "Trips 3" that yields nothing once tapped is worse than no count.
+      counts: {
+        for (final f in _Filter.values) f: matched.where(f.accepts).length,
+      },
+      filtering: query.isNotEmpty || _filter != _Filter.all,
+    );
+  }
+
+  Widget _entryCard(_Entry entry, SpeedUnit unit, String query) =>
+      switch (entry) {
+        _RideEntry(:final ride) => _RideCard(
+            ride: ride,
+            unit: unit,
+            query: query,
+            onTap: () => _openRide(ride),
+            onDelete: () => _deleteWithUndo(ride),
+          ),
+        _TripEntry(:final summary) => _TripCard(
+            summary: summary,
+            unit: unit,
+            query: query,
+            onTap: () => _openTrip(summary),
+            onOpenStint: _openRide,
+          ),
+      };
+
+  /// Arms the next recording as this trip's next stint, then jumps to Record.
+  void _continueTrip(TripSummary t) {
+    ref
+        .read(trackingControllerProvider.notifier)
+        .beginContinuation(t.trip.id, t.trip.name);
+    ref.read(homeTabProvider.notifier).state = 0; // Record tab
+  }
+
+  void _openTrip(TripSummary t) => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => TripDetailScreen(trip: t.trip)),
+      );
+
+  void _openRide(Ride r) => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => RideDetailScreen(ride: r)),
+      );
 
   /// Collapsing header: the week strip scrolls away and the toolbar keeps "Rides"
   /// plus the week's distance, so the number stays reachable without holding
@@ -469,7 +513,7 @@ bool _isThisMonth(DateTime when) {
 ///
 /// Months rather than days: a rider records a handful of rides a week, so
 /// day headers would outnumber the rows they head.
-List<({String label, double meters, List<_Entry> entries})> _groupByMonth(
+List<_MonthGroup> _groupByMonth(
   List<_Entry> entries,
 ) {
   final out = <({String label, double meters, List<_Entry> entries})>[];
@@ -480,7 +524,7 @@ List<({String label, double meters, List<_Entry> entries})> _groupByMonth(
     if (key != currentKey) {
       currentKey = key;
       out.add((
-        label: '${_months[local.month - 1]} ${local.year}',
+        label: '${longMonth(local.month)} ${local.year}',
         meters: 0,
         entries: <_Entry>[],
       ));
@@ -775,7 +819,7 @@ class _OpenTripCard extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                '$stintLabel · $distance · ${_fmtDuration(stats.durationSeconds)}',
+                '$stintLabel · $distance · ${formatDuration(stats.durationSeconds)}',
                 style: TextStyle(color: cx.textDim, fontSize: 13),
               ),
               const SizedBox(height: 14),
@@ -1318,7 +1362,7 @@ class _MetricsLine extends StatelessWidget {
         children: [
           TextSpan(text: date, style: dim),
           TextSpan(text: '  ·  ', style: dim),
-          TextSpan(text: _fmtDuration(durationSeconds), style: value),
+          TextSpan(text: formatDuration(durationSeconds), style: value),
           TextSpan(text: '  ·  ', style: dim),
           TextSpan(text: unit.speed(avgKmh).toStringAsFixed(0), style: value),
           TextSpan(text: ' avg  ·  ', style: dim),
@@ -1381,30 +1425,11 @@ class _Highlighted extends StatelessWidget {
   }
 }
 
-const _months = [
-  'January', 'February', 'March', 'April', 'May', 'June', //
-  'July', 'August', 'September', 'October', 'November', 'December',
-];
-
-const _shortMonths = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', //
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-];
-
 /// e.g. `Jul 2 · 22:36`. The year is carried by the month header above, so the
 /// row doesn't repeat it. Avoids pulling in the intl package.
 String _formatDate(DateTime dt) {
   final local = dt.toLocal();
   final hh = local.hour.toString().padLeft(2, '0');
   final mm = local.minute.toString().padLeft(2, '0');
-  return '${_shortMonths[local.month - 1]} ${local.day} · $hh:$mm';
-}
-
-String _fmtDuration(int seconds) {
-  final h = seconds ~/ 3600;
-  final m = (seconds % 3600) ~/ 60;
-  final s = seconds % 60;
-  final mm = m.toString().padLeft(2, '0');
-  final ss = s.toString().padLeft(2, '0');
-  return h > 0 ? '$h:$mm:$ss' : '$mm:$ss';
+  return '${shortMonth(local.month)} ${local.day} · $hh:$mm';
 }

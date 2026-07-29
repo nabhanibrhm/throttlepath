@@ -1,6 +1,7 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 
+import '../core/duration_format.dart';
 import '../core/units.dart';
 import '../data/models/track_point.dart';
 import '../theme/app_theme.dart';
@@ -298,7 +299,7 @@ class _ElevationSpeedChartState extends State<ElevationSpeedChart> {
                       reservedSize: 28,
                       interval: maxX / 4,
                       getTitlesWidget: (v, meta) =>
-                          Text(_fmtClock(v.round()), style: _tick(cx.textTertiary)),
+                          Text(formatClock(v.round()), style: _tick(cx.textTertiary)),
                     ),
                   ),
                 ),
@@ -410,12 +411,3 @@ class _ElevStat extends StatelessWidget {
   }
 }
 
-/// Seconds → `m:ss` (or `h:mm:ss`) for the time axis.
-String _fmtClock(int seconds) {
-  final h = seconds ~/ 3600;
-  final m = (seconds % 3600) ~/ 60;
-  final s = seconds % 60;
-  final mm = m.toString().padLeft(2, '0');
-  final ss = s.toString().padLeft(2, '0');
-  return h > 0 ? '$h:$mm:$ss' : '$m:$ss';
-}

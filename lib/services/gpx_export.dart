@@ -1,10 +1,6 @@
-import 'dart:io';
-
-import 'package:flutter/services.dart';
-import 'package:path_provider/path_provider.dart';
-
 import '../data/models/ride.dart';
 import '../data/models/track_point.dart';
+import 'share_channel.dart';
 
 /// Writes a ride (or a whole trip) out as GPX 1.1 and hands it to the system
 /// share sheet.
@@ -14,8 +10,6 @@ import '../data/models/track_point.dart';
 /// card is lovely and completely unusable in another app.
 class GpxExport {
   GpxExport._();
-
-  static const _channel = MethodChannel('id.co.opentrack.throttlepath/share');
 
   /// GPX timestamps are UTC, ISO 8601, with a `Z`.
   static String _isoUtc(DateTime t) =>
@@ -44,17 +38,19 @@ class GpxExport {
     required List<TrackPoint> points,
     List<int> stintStarts = const [],
   }) {
-    final name = ride.name?.trim();
+    final trimmed = ride.name?.trim();
+    final name =
+        xmlEscape(trimmed != null && trimmed.isNotEmpty ? trimmed : 'Ride');
     final b = StringBuffer()
       ..writeln('<?xml version="1.0" encoding="UTF-8"?>')
       ..writeln('<gpx version="1.1" creator="ThrottlePath" '
           'xmlns="http://www.topografix.com/GPX/1/1">')
       ..writeln('  <metadata>')
-      ..writeln('    <name>${xmlEscape(name?.isNotEmpty == true ? name! : 'Ride')}</name>')
+      ..writeln('    <name>$name</name>')
       ..writeln('    <time>${_isoUtc(ride.startTime)}</time>')
       ..writeln('  </metadata>')
       ..writeln('  <trk>')
-      ..writeln('    <name>${xmlEscape(name?.isNotEmpty == true ? name! : 'Ride')}</name>')
+      ..writeln('    <name>$name</name>')
       ..writeln('    <type>motorcycling</type>');
 
     // Segment boundaries, deduplicated and in order: a stint start of 0 is implied
@@ -123,21 +119,12 @@ class GpxExport {
     if (points.isEmpty) {
       throw StateError('Nothing to export — this ride has no recorded track.');
     }
-    final cacheDir = await getTemporaryDirectory();
-    final dir = Directory('${cacheDir.path}/share_files');
-    if (!await dir.exists()) await dir.create(recursive: true);
-    final file = File('${dir.path}/${fileNameFor(ride)}');
-    await file.writeAsString(
-      buildGpx(ride: ride, points: points, stintStarts: stintStarts),
-      flush: true,
+    final name = ride.name?.trim();
+    await ShareChannel.shareTextFile(
+      fileName: fileNameFor(ride),
+      contents: buildGpx(ride: ride, points: points, stintStarts: stintStarts),
+      mimeType: 'application/gpx+xml',
+      title: name != null && name.isNotEmpty ? name : 'ThrottlePath ride',
     );
-
-    await _channel.invokeMethod('shareFile', {
-      'filePath': file.path,
-      'mimeType': 'application/gpx+xml',
-      'title': ride.name?.trim().isNotEmpty == true
-          ? ride.name!.trim()
-          : 'ThrottlePath ride',
-    });
   }
 }

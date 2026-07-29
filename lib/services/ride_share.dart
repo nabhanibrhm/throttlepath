@@ -2,13 +2,13 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../core/units.dart';
 import '../data/models/ride.dart';
 import '../data/models/track_point.dart';
 import '../ui/share_card.dart';
+import 'share_channel.dart';
 import 'widget_to_image.dart';
 
 /// Where a shared image ended up going.
@@ -28,7 +28,7 @@ enum ShareOutcome {
 class RideShare {
   RideShare._();
 
-  static const _channel = MethodChannel('id.co.opentrack.throttlepath/share');
+  static const _channel = ShareChannel.channel;
 
   /// The 9:16 sticker canvas the card is centred within, and its output density.
   static const _canvas = Size(360, 640);
@@ -70,11 +70,7 @@ class RideShare {
   /// Writes to the app's private cache (not the public gallery), under a
   /// dedicated folder that FileProvider is scoped to.
   static Future<File> _writeToCache(Ride ride, Uint8List pngBytes) async {
-    final cacheDir = await getTemporaryDirectory();
-    final shareDir = Directory('${cacheDir.path}/share_images');
-    if (!await shareDir.exists()) {
-      await shareDir.create(recursive: true);
-    }
+    final shareDir = await ShareChannel.cacheFolder('share_images');
     final file = File('${shareDir.path}/ride_${ride.id}.png');
     await file.writeAsBytes(pngBytes, flush: true);
     return file;

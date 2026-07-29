@@ -137,59 +137,7 @@ class SpeedDistanceChart extends StatelessWidget {
                     ),
                   ),
                 ),
-                lineTouchData: interactive
-                    ? LineTouchData(
-                        enabled: true,
-                        touchTooltipData: LineTouchTooltipData(
-                          getTooltipColor: (_) => cx.surface,
-                          tooltipRoundedRadius: 8,
-                          tooltipBorder: BorderSide(color: cx.accentInk, width: 1),
-                          tooltipPadding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 6),
-                          fitInsideHorizontally: true,
-                          fitInsideVertically: true,
-                          getTooltipItems: (touched) => [
-                            for (final s in touched)
-                              LineTooltipItem(
-                                '${s.x.toStringAsFixed(2)} ${unit.distanceLabel}\n',
-                                TextStyle(
-                                  color: cx.textDim,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500,
-                                  fontFeatures: kTabularFigures,
-                                ),
-                                children: [
-                                  TextSpan(
-                                    text: '${s.y.toStringAsFixed(0)} '
-                                        '${unit.speedLabel}',
-                                    style: TextStyle(
-                                      color: cx.textBright,
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                          ],
-                        ),
-                        getTouchedSpotIndicator: (bar, indices) => [
-                          for (final _ in indices)
-                            TouchedSpotIndicatorData(
-                              FlLine(color: cx.accentInk, strokeWidth: 1.5),
-                              FlDotData(
-                                show: true,
-                                getDotPainter: (spot, a, b, c) =>
-                                    FlDotCirclePainter(
-                                  radius: 4,
-                                  color: cx.accent,
-                                  strokeWidth: 2,
-                                  strokeColor: cx.canvas,
-                                ),
-                              ),
-                            ),
-                        ],
-                      )
-                    : const LineTouchData(enabled: false),
+                lineTouchData: _touchData(cx),
                 clipData: const FlClipData.all(),
                 lineBarsData: [
                   LineChartBarData(
@@ -220,6 +168,63 @@ class SpeedDistanceChart extends StatelessWidget {
           _legend(cx),
         ],
       ),
+    );
+  }
+
+  /// Drag-to-scrub: a crosshair plus a bubble reading distance over speed.
+  ///
+  /// Disabled outright when [interactive] is false — the same chart is drawn
+  /// inert on the summary card, where there is nothing to drag with.
+  LineTouchData _touchData(AppPalette cx) {
+    if (!interactive) return const LineTouchData(enabled: false);
+    return LineTouchData(
+      enabled: true,
+      touchTooltipData: LineTouchTooltipData(
+        getTooltipColor: (_) => cx.surface,
+        tooltipRoundedRadius: 8,
+        tooltipBorder: BorderSide(color: cx.accentInk, width: 1),
+        tooltipPadding:
+            const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        fitInsideHorizontally: true,
+        fitInsideVertically: true,
+        getTooltipItems: (touched) => [
+          for (final s in touched)
+            LineTooltipItem(
+              '${s.x.toStringAsFixed(2)} ${unit.distanceLabel}\n',
+              TextStyle(
+                color: cx.textDim,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                fontFeatures: kTabularFigures,
+              ),
+              children: [
+                TextSpan(
+                  text: '${s.y.toStringAsFixed(0)} ${unit.speedLabel}',
+                  style: TextStyle(
+                    color: cx.textBright,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+        ],
+      ),
+      getTouchedSpotIndicator: (bar, indices) => [
+        for (final _ in indices)
+          TouchedSpotIndicatorData(
+            FlLine(color: cx.accentInk, strokeWidth: 1.5),
+            FlDotData(
+              show: true,
+              getDotPainter: (spot, a, b, c) => FlDotCirclePainter(
+                radius: 4,
+                color: cx.accent,
+                strokeWidth: 2,
+                strokeColor: cx.canvas,
+              ),
+            ),
+          ),
+      ],
     );
   }
 

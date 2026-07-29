@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -8,15 +10,22 @@ import 'ui/splash_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Load the saved theme mode before the first frame so there's no flash.
+  // Load the saved preferences before the first frame so there is no flash of the
+  // wrong theme or unit. Read together rather than in sequence — each lives in its
+  // own file and none depends on another, so awaiting them one at a time is six
+  // round-trips before anything can be drawn.
+  //
   // Heavier startup work (DB, background service, tile cache) runs in
   // SplashScreen so the branded loader is visible while it happens.
-  final mode = await SettingsService.instance.loadThemeMode();
-  final unit = await SettingsService.instance.loadSpeedUnit();
-  final recordView = await SettingsService.instance.loadRecordView();
-  final gaugeStyle = await SettingsService.instance.loadSpeedGaugeStyle();
-  final countdown = await SettingsService.instance.loadCountdownEnabled();
-  final keepScreenOn = await SettingsService.instance.loadKeepScreenOn();
+  final prefs = SettingsService.instance;
+  final (mode, unit, recordView, gaugeStyle, countdown, keepScreenOn) = await (
+    prefs.loadThemeMode(),
+    prefs.loadSpeedUnit(),
+    prefs.loadRecordView(),
+    prefs.loadSpeedGaugeStyle(),
+    prefs.loadCountdownEnabled(),
+    prefs.loadKeepScreenOn(),
+  ).wait;
   runApp(
     ProviderScope(
       overrides: [

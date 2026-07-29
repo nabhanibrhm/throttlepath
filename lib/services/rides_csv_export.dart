@@ -1,10 +1,6 @@
-import 'dart:io';
-
-import 'package:flutter/services.dart';
-import 'package:path_provider/path_provider.dart';
-
 import '../data/database_service.dart';
 import '../data/models/ride.dart';
+import 'share_channel.dart';
 
 /// Exports the whole ride history as one CSV and hands it to the share sheet.
 ///
@@ -17,8 +13,6 @@ import '../data/models/ride.dart';
 /// complementary, not competing.
 class RidesCsvExport {
   RidesCsvExport._();
-
-  static const _channel = MethodChannel('id.co.opentrack.throttlepath/share');
 
   static const _headers = [
     'id',
@@ -49,14 +43,15 @@ class RidesCsvExport {
     return '"${s.replaceAll('"', '""')}"';
   }
 
+  static String _two(int n) => n.toString().padLeft(2, '0');
+
   /// Local time as `YYYY-MM-DD HH:MM:SS` — what a spreadsheet parses as a date
   /// without being told to.
   static String _stamp(DateTime? t) {
     if (t == null) return '';
     final d = t.toLocal();
-    String two(int n) => n.toString().padLeft(2, '0');
-    return '${d.year}-${two(d.month)}-${two(d.day)} '
-        '${two(d.hour)}:${two(d.minute)}:${two(d.second)}';
+    return '${d.year}-${_two(d.month)}-${_two(d.day)} '
+        '${_two(d.hour)}:${_two(d.minute)}:${_two(d.second)}';
   }
 
   /// Builds the CSV document for [rides]. Pure, so it is testable without a DB.
@@ -86,8 +81,7 @@ class RidesCsvExport {
 
   static String fileNameFor(DateTime now) {
     final d = now.toLocal();
-    String two(int n) => n.toString().padLeft(2, '0');
-    return 'throttlepath-rides-${d.year}${two(d.month)}${two(d.day)}.csv';
+    return 'throttlepath-rides-${d.year}${_two(d.month)}${_two(d.day)}.csv';
   }
 
   /// Writes every finished ride to a CSV in the shareable cache folder and opens
@@ -101,17 +95,12 @@ class RidesCsvExport {
       throw StateError('No finished rides to export yet.');
     }
 
-    final cacheDir = await getTemporaryDirectory();
-    final dir = Directory('${cacheDir.path}/share_files');
-    if (!await dir.exists()) await dir.create(recursive: true);
-    final file = File('${dir.path}/${fileNameFor(now ?? DateTime.now())}');
-    await file.writeAsString(buildCsv(finished), flush: true);
-
-    await _channel.invokeMethod('shareFile', {
-      'filePath': file.path,
-      'mimeType': 'text/csv',
-      'title': 'ThrottlePath rides',
-    });
+    await ShareChannel.shareTextFile(
+      fileName: fileNameFor(now ?? DateTime.now()),
+      contents: buildCsv(finished),
+      mimeType: 'text/csv',
+      title: 'ThrottlePath rides',
+    );
     return finished.length;
   }
 }

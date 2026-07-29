@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../core/date_format.dart';
 import '../data/database_service.dart';
 import '../data/models/trip.dart';
 import '../services/geocoding_service.dart';
@@ -112,32 +113,43 @@ class TrackingController extends StateNotifier<TrackingUiState> {
   late final StreamSubscription<String?> _cancelledSub;
 
   void _onTelemetry(LiveTelemetry t) {
-    var route = state.route;
-    var samples = state.speedSamples;
-    // Telemetry now ticks once a second, re-sending the last known coords; only
-    // extend the polyline when the position actually changed (a real new fix).
-    if (t.lat != null && t.lon != null) {
-      final point = LatLng(t.lat!, t.lon!);
-      final last = route.isNotEmpty ? route.last : null;
-      if (last == null ||
-          last.latitude != point.latitude ||
-          last.longitude != point.longitude) {
-        route = [...route, point];
-        // Capture a chart sample on each real new fix while recording (distance
-        // only advances then; acquiring/countdown fixes carry no distance).
-        if (t.phase == 'recording') {
-          samples = [...samples, SpeedSample(t.distanceMeters, t.speedKmh)];
-        }
-      }
-    }
+    final track = _extendTrack(t);
     state = state.copyWith(
       isTracking: true,
       isPaused: t.paused,
       phase: t.phase,
       countdown: t.countdown,
       telemetry: t,
-      route: route,
-      speedSamples: samples,
+      route: track.route,
+      speedSamples: track.samples,
+    );
+  }
+
+  /// The polyline and chart samples after folding in [t], unchanged when [t]
+  /// carries nothing new.
+  ///
+  /// Telemetry ticks once a second and re-sends the last known coordinates, so
+  /// growing the polyline on every tick would pile up duplicate vertices at a
+  /// standstill.
+  ({List<LatLng> route, List<SpeedSample> samples}) _extendTrack(
+      LiveTelemetry t) {
+    final route = state.route;
+    final samples = state.speedSamples;
+    final lat = t.lat;
+    final lon = t.lon;
+    if (lat == null || lon == null) return (route: route, samples: samples);
+
+    final last = route.isNotEmpty ? route.last : null;
+    if (last != null && last.latitude == lat && last.longitude == lon) {
+      return (route: route, samples: samples);
+    }
+    return (
+      route: [...route, LatLng(lat, lon)],
+      // A chart sample only on a real new fix while recording — distance only
+      // advances then, so acquiring/countdown fixes carry none.
+      samples: t.phase == 'recording'
+          ? [...samples, SpeedSample(t.distanceMeters, t.speedKmh)]
+          : samples,
     );
   }
 
@@ -361,12 +373,8 @@ class TrackingController extends StateNotifier<TrackingUiState> {
 /// Dated placeholder for an unnamed trip, e.g. `Trip · Jul 26`. Keeps a
 /// History list of unnamed trips distinguishable until the rider renames them.
 String _defaultTripName(DateTime when) {
-  const months = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', //
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-  ];
   final local = when.toLocal();
-  return 'Trip · ${months[local.month - 1]} ${local.day}';
+  return 'Trip · ${shortMonth(local.month)} ${local.day}';
 }
 
 final trackingControllerProvider =

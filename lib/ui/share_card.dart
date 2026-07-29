@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 
+import '../core/duration_format.dart';
 import '../core/speed_palette.dart';
 import '../core/units.dart';
 import '../data/models/ride.dart';
@@ -272,8 +273,8 @@ class ShareCard extends StatelessWidget {
 
   String get _distance =>
       unit.distanceMeters(ride.totalDistanceMeters).toStringAsFixed(2);
-  String get _totalTime => _fmtDuration(ride.durationSeconds);
-  String get _movingTime => _fmtDuration(ride.movingSeconds);
+  String get _totalTime => formatDuration(ride.durationSeconds);
+  String get _movingTime => formatDuration(ride.movingSeconds);
   String get _avg => unit.speed(ride.averageSpeedKmh).toStringAsFixed(0);
   String get _max => unit.speed(ride.maxSpeedKmh).toStringAsFixed(0);
   String get _pace =>
@@ -623,14 +624,6 @@ class _RoutePainter extends CustomPainter {
       !listEquals(oldDelegate.stintStarts, stintStarts);
 }
 
-String _fmtDuration(int seconds) {
-  final h = seconds ~/ 3600;
-  final m = (seconds % 3600) ~/ 60;
-  final s = seconds % 60;
-  final mm = m.toString().padLeft(2, '0');
-  final ss = s.toString().padLeft(2, '0');
-  return h > 0 ? '$h:$mm:$ss' : '$mm:$ss';
-}
 
 /// Pace in minutes:seconds per displayed distance unit (km or mi), based on
 /// moving time (so stops don't drag it down). '--:--' when there's not enough

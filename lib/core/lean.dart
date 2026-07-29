@@ -321,79 +321,26 @@ LeanAnalysis analyseLean(
   final bandSeconds = <int, double>{};
 
   for (var i = step; i + step < readings.length; i++) {
-    final a = readings[i - step];
-    final b = readings[i];
-    final c = readings[i + step];
-
-    final dt1 = b.time.difference(a.time).inMilliseconds / 1000.0;
-    final dt2 = c.time.difference(b.time).inMilliseconds / 1000.0;
-    // Guarded per leg, so a blackout inside the window is caught even when the
-    // total span still looks reasonable.
-    if (dt1 < kMinLeanDtSeconds || dt2 < kMinLeanDtSeconds) continue;
-    if (dt1 > kMaxLeanDtSeconds || dt2 > kMaxLeanDtSeconds) continue;
-
-    // Heading into and out of the window, and the turn between them.
-    final double h1;
-    final double h2;
-    final double omegaSpan;
-    if (chosen == LeanHeadingSource.reportedCourse) {
-      final ha = a.headingDegrees;
-      final hc = c.headingDegrees;
-      if (ha == null || hc == null) continue;
-      h1 = ha;
-      h2 = hc;
-      omegaSpan = dt1 + dt2;
-    } else {
-      h1 = bearingDegrees(a.latitude, a.longitude, b.latitude, b.longitude);
-      h2 = bearingDegrees(b.latitude, b.longitude, c.latitude, c.longitude);
-      // Two bearings measured over adjacent legs are separated by the mean of
-      // those legs, not their sum — each bearing sits at its own leg's midpoint.
-      omegaSpan = (dt1 + dt2) / 2.0;
-    }
-    if (omegaSpan <= 0) continue;
-
-    // Smooth-arc check. Applies whichever heading source is in play, because it
-    // asks a question about the positions rather than the heading: did the bike
-    // actually sweep through this window, or did the fixes scatter?
-    final legA =
-        haversineMeters(a.latitude, a.longitude, b.latitude, b.longitude);
-    final legB =
-        haversineMeters(b.latitude, b.longitude, c.latitude, c.longitude);
-    final chord =
-        haversineMeters(a.latitude, a.longitude, c.latitude, c.longitude);
-    final path = legA + legB;
-    if (path <= 0) continue;
-    if (chord / path < kMinChordRatio) continue;
-
-    final omega = signedTurnDegrees(h1, h2) * (math.pi / 180.0) / omegaSpan;
-
-    // Prefer the fix's own Doppler speed — accurate even where position is
-    // noisy — and fall back to displacement across the window.
-    var vMps = b.speedMps;
-    if (!vMps.isFinite || vMps <= 0) {
-      final span = dt1 + dt2;
-      vMps = span > 0
-          ? haversineMeters(a.latitude, a.longitude, c.latitude, c.longitude) /
-              span
-          : 0.0;
-    }
-    if (vMps * 3.6 < kMinLeanSpeedKmh) continue;
-
-    final magnitude = math.atan((vMps * omega.abs()) / kGravity) * 180.0 / math.pi;
-    if (magnitude > kMaxPlausibleLeanDegrees) continue;
-    final leanDegrees = omega < 0 ? -magnitude : magnitude;
+    final estimate = _estimateAtWindow(
+      readings[i - step],
+      readings[i],
+      readings[i + step],
+      chosen,
+    );
+    if (estimate == null) continue;
 
     samples.add((
-      tSec: b.time.difference(start).inMilliseconds / 1000.0,
+      tSec: readings[i].time.difference(start).inMilliseconds / 1000.0,
       distanceMeters: cumulative[i],
-      leanDegrees: leanDegrees,
-      speedKmh: vMps * 3.6,
+      leanDegrees: estimate.leanDegrees,
+      speedKmh: estimate.speedKmh,
     ));
     centreIndex.add(i);
 
     // Time-weight the band by the interval this sample stands for.
-    final bandFrom = (magnitude ~/ 5) * 5;
-    bandSeconds[bandFrom] = (bandSeconds[bandFrom] ?? 0) + (dt1 + dt2) / 2.0;
+    final bandFrom = (estimate.magnitudeDegrees ~/ 5) * 5;
+    bandSeconds[bandFrom] =
+        (bandSeconds[bandFrom] ?? 0) + estimate.weightSeconds;
   }
 
   if (samples.length < kMinLeanSamples) return LeanAnalysis.empty;
@@ -435,6 +382,115 @@ LeanAnalysis analyseLean(
   );
 }
 
+/// One accepted lean estimate, before it is placed on the ride's axes.
+typedef _WindowEstimate = ({
+  double leanDegrees,
+  double magnitudeDegrees,
+  double speedKmh,
+  double weightSeconds,
+});
+
+/// The yaw rate across one window, and the span it was measured over.
+typedef _TurnRate = ({double omegaRadPerSec, double spanSeconds});
+
+/// Estimates lean for the window [a]–[b]–[c], or returns null when any guard
+/// rejects it. [b] is the centre reading the sample is attributed to.
+///
+/// Every `null` here is one of the documented rejections above, in the order
+/// they are cheapest to test.
+_WindowEstimate? _estimateAtWindow(
+  LeanReading a,
+  LeanReading b,
+  LeanReading c,
+  LeanHeadingSource source,
+) {
+  final dt1 = b.time.difference(a.time).inMilliseconds / 1000.0;
+  final dt2 = c.time.difference(b.time).inMilliseconds / 1000.0;
+  // Guarded per leg, so a blackout inside the window is caught even when the
+  // total span still looks reasonable.
+  if (dt1 < kMinLeanDtSeconds || dt2 < kMinLeanDtSeconds) return null;
+  if (dt1 > kMaxLeanDtSeconds || dt2 > kMaxLeanDtSeconds) return null;
+
+  final turn = _turnRate(a, b, c, source, dt1, dt2);
+  if (turn == null) return null;
+
+  final chord =
+      haversineMeters(a.latitude, a.longitude, c.latitude, c.longitude);
+  if (!_tracesSmoothArc(a, b, c, chord)) return null;
+
+  final vMps = _windowSpeedMps(b, chord, dt1 + dt2);
+  if (vMps * 3.6 < kMinLeanSpeedKmh) return null;
+
+  final magnitude =
+      math.atan((vMps * turn.omegaRadPerSec.abs()) / kGravity) * 180.0 / math.pi;
+  if (magnitude > kMaxPlausibleLeanDegrees) return null;
+
+  return (
+    leanDegrees: turn.omegaRadPerSec < 0 ? -magnitude : magnitude,
+    magnitudeDegrees: magnitude,
+    speedKmh: vMps * 3.6,
+    weightSeconds: (dt1 + dt2) / 2.0,
+  );
+}
+
+/// Heading into and out of the window, differenced into a yaw rate. Null when
+/// the chosen source cannot supply a heading for this window.
+_TurnRate? _turnRate(
+  LeanReading a,
+  LeanReading b,
+  LeanReading c,
+  LeanHeadingSource source,
+  double dt1,
+  double dt2,
+) {
+  final double h1;
+  final double h2;
+  final double span;
+  if (source == LeanHeadingSource.reportedCourse) {
+    final ha = a.headingDegrees;
+    final hc = c.headingDegrees;
+    if (ha == null || hc == null) return null;
+    h1 = ha;
+    h2 = hc;
+    span = dt1 + dt2;
+  } else {
+    h1 = bearingDegrees(a.latitude, a.longitude, b.latitude, b.longitude);
+    h2 = bearingDegrees(b.latitude, b.longitude, c.latitude, c.longitude);
+    // Two bearings measured over adjacent legs are separated by the mean of
+    // those legs, not their sum — each bearing sits at its own leg's midpoint.
+    span = (dt1 + dt2) / 2.0;
+  }
+  if (span <= 0) return null;
+  return (
+    omegaRadPerSec: signedTurnDegrees(h1, h2) * (math.pi / 180.0) / span,
+    spanSeconds: span,
+  );
+}
+
+/// The smooth-arc guard. Applies whichever heading source is in play, because it
+/// asks a question about the positions rather than the heading: did the bike
+/// actually sweep through this window, or did the fixes scatter?
+bool _tracesSmoothArc(
+  LeanReading a,
+  LeanReading b,
+  LeanReading c,
+  double chord,
+) {
+  final path =
+      haversineMeters(a.latitude, a.longitude, b.latitude, b.longitude) +
+          haversineMeters(b.latitude, b.longitude, c.latitude, c.longitude);
+  if (path <= 0) return false;
+  return chord / path >= kMinChordRatio;
+}
+
+/// Prefer the centre fix's own Doppler speed — accurate even where position is
+/// noisy — and fall back to displacement across the window.
+double _windowSpeedMps(LeanReading b, double chord, double spanSeconds) {
+  final reported = b.speedMps;
+  if (reported.isFinite && reported > 0) return reported;
+  return spanSeconds > 0 ? chord / spanSeconds : 0.0;
+}
+
 /// Largest |lean| sustained across [kPeakCorroborationSamples] consecutive
 /// samples — i.e. the greatest value `v` for which that many samples in a row all
 /// reach `v`, **leaning the same way**.
@@ -453,40 +509,55 @@ LeanAnalysis analyseLean(
     List<LeanSample> samples, List<int> centreIndex) {
   const k = kPeakCorroborationSamples;
   if (samples.length < k) return null;
+
   double? best;
   var bestAt = 0;
   for (var i = 0; i + k - 1 < samples.length; i++) {
-    var windowMin = double.infinity;
-    var usable = true;
-    for (var j = i; j < i + k; j++) {
-      if (j > i) {
-        final sameSide = samples[j].leanDegrees.isNegative ==
-            samples[j - 1].leanDegrees.isNegative;
-        if (!sameSide ||
-            centreIndex[j] != centreIndex[j - 1] + 1 ||
-            samples[j].tSec - samples[j - 1].tSec > kCorroborationMaxGapSeconds) {
-          usable = false;
-          break;
-        }
-      }
-      final m = samples[j].leanDegrees.abs();
-      if (m < windowMin) windowMin = m;
-    }
-    if (!usable) continue;
-    if (best == null || windowMin > best) {
-      best = windowMin;
-      // Report the window's strongest sample as the peak's location — that is the
-      // apex the rider would point at, and it is inside the corroborated run.
-      var apex = i;
-      for (var j = i; j < i + k; j++) {
-        if (samples[j].leanDegrees.abs() > samples[apex].leanDegrees.abs()) {
-          apex = j;
-        }
-      }
-      bestAt = apex;
-    }
+    final windowMin = _corroboratedFloor(samples, centreIndex, i, k);
+    if (windowMin == null) continue;
+    if (best != null && windowMin <= best) continue;
+    best = windowMin;
+    bestAt = _apexIndex(samples, i, k);
   }
   return best == null ? null : (value: best, atIndex: bestAt);
+}
+
+/// The lean level every sample in `[from, from + count)` clears, or null when the
+/// run is not a single uninterrupted same-side sweep.
+double? _corroboratedFloor(
+  List<LeanSample> samples,
+  List<int> centreIndex,
+  int from,
+  int count,
+) {
+  var floor = samples[from].leanDegrees.abs();
+  for (var j = from + 1; j < from + count; j++) {
+    if (!_continuesRun(samples, centreIndex, j)) return null;
+    final magnitude = samples[j].leanDegrees.abs();
+    if (magnitude < floor) floor = magnitude;
+  }
+  return floor;
+}
+
+/// Whether sample [j] genuinely continues the corroborated run ending at `j - 1`.
+bool _continuesRun(List<LeanSample> samples, List<int> centreIndex, int j) {
+  final sameSide = samples[j].leanDegrees.isNegative ==
+      samples[j - 1].leanDegrees.isNegative;
+  if (!sameSide) return false;
+  if (centreIndex[j] != centreIndex[j - 1] + 1) return false;
+  return samples[j].tSec - samples[j - 1].tSec <= kCorroborationMaxGapSeconds;
+}
+
+/// The strongest sample in `[from, from + count)` — the apex the rider would
+/// point at, and always inside the corroborated run.
+int _apexIndex(List<LeanSample> samples, int from, int count) {
+  var apex = from;
+  for (var j = from + 1; j < from + count; j++) {
+    if (samples[j].leanDegrees.abs() > samples[apex].leanDegrees.abs()) {
+      apex = j;
+    }
+  }
+  return apex;
 }
 
 /// Smooths [samples] for **drawing only**, with a centred moving average.
