@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/geo.dart';
 import '../core/lean.dart';
+import '../core/smoothness.dart';
 import '../core/units.dart';
 import '../data/database_service.dart';
 import '../data/models/ride.dart';
@@ -371,9 +372,24 @@ class _ChartTabsState extends State<_ChartTabs>
   /// put two full passes over the track on every frame of a tab swipe.
   LeanAnalysis _lean = LeanAnalysis.empty;
 
+  /// Same reasoning as [_lean]: [SmoothnessChart] used to run this itself in
+  /// `build`, putting a full accel-analysis pass over every track point on
+  /// each tab-swipe frame.
+  AccelAnalysis _smoothness = AccelAnalysis.empty;
+
+  AccelAnalysis _computeSmoothness() => analyseSmoothness([
+        for (final p in widget.points)
+          (time: p.timestamp, speedMps: p.speedMps),
+      ]);
+
   /// Mirrors [ElevationSpeedChart]'s own guard so the elevation tab is only
   /// offered when it would actually render (>= 2 altitude fixes, >= 2 m swing).
-  bool get _hasElevation {
+  /// Computed once alongside [_lean] rather than as a per-build getter — same
+  /// reasoning: re-scanning every track point on every tab-swipe frame is
+  /// wasted work once the track is known not to change mid-swipe.
+  bool _hasElevation = false;
+
+  bool _computeHasElevation() {
     var count = 0;
     double? mn, mx;
     for (final p in widget.points) {
@@ -401,6 +417,8 @@ class _ChartTabsState extends State<_ChartTabs>
   void initState() {
     super.initState();
     _lean = LeanChart.analyse(widget.points);
+    _smoothness = _computeSmoothness();
+    _hasElevation = _computeHasElevation();
     _syncController();
   }
 
@@ -409,6 +427,8 @@ class _ChartTabsState extends State<_ChartTabs>
     super.didUpdateWidget(old);
     if (!identical(old.points, widget.points)) {
       _lean = LeanChart.analyse(widget.points);
+      _smoothness = _computeSmoothness();
+      _hasElevation = _computeHasElevation();
     }
     _syncController();
   }
@@ -462,6 +482,7 @@ class _ChartTabsState extends State<_ChartTabs>
       SpeedZoneChart(points: widget.points, unit: widget.unit),
       SmoothnessChart(
         rideId: widget.rideId,
+        analysis: _smoothness,
         points: widget.points,
         unit: widget.unit,
       ),

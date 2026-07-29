@@ -91,24 +91,35 @@ List<({double x, double y})> normalizeRoute(List<RoutePoint> points) {
   ];
 }
 
+/// RDP's worst case (a maximally unbalanced split every time — a real risk on
+/// a many-hour recording nobody remembered to stop) is quadratic in point
+/// count. A rider's real ride never approaches this — even 5.5 hours at 1 Hz
+/// is under it — so it never touches normal behaviour; it only bounds the
+/// freak case before the epsilon-search loop below gets a chance to run RDP
+/// against the full track.
+const int _maxRdpWorkingSet = 20000;
+
 /// RDP with the tolerance searched for, rather than fixed: the caller cares about
 /// a point budget, not about metres. Starts fine and coarsens geometrically until
 /// the result fits, so a twisty route keeps more of its detail budget than a
 /// straight one would need.
 List<RoutePoint> _simplifyToCount(List<RoutePoint> points, int maxPoints) {
   if (points.length <= maxPoints) return points;
+  final working = points.length > _maxRdpWorkingSet
+      ? _stride(points, _maxRdpWorkingSet)
+      : points;
   // ~1e-5 degrees is roughly a metre — below GPS noise, so the first pass mostly
   // just strips duplicate fixes.
   var epsilon = 1e-5;
-  var result = points;
+  var result = working;
   for (var i = 0; i < 32; i++) {
-    result = _rdp(points, epsilon);
+    result = _rdp(working, epsilon);
     if (result.length <= maxPoints) return result;
     epsilon *= 1.8;
   }
   // Pathological input (every point a corner): fall back to a stride, still
   // keeping the true endpoints.
-  return _stride(points, maxPoints);
+  return _stride(working, maxPoints);
 }
 
 List<RoutePoint> _rdp(List<RoutePoint> points, double epsilon) {

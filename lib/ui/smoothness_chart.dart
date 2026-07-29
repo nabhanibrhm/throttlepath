@@ -28,6 +28,7 @@ class SmoothnessChart extends ConsumerWidget {
   const SmoothnessChart({
     super.key,
     required this.rideId,
+    this.analysis,
     required this.points,
     required this.unit,
   });
@@ -35,15 +36,23 @@ class SmoothnessChart extends ConsumerWidget {
   /// The ride being shown — excluded from its own comparison set.
   final int rideId;
 
+  /// Pass this when the caller already has it (`_ChartTabsState` computes it
+  /// once when the track changes) to skip re-running [analyseSmoothness] here.
+  /// Left null this falls back to computing it in `build`, same as before —
+  /// fine for tests, but on the real ride-detail screen it would put a full
+  /// pass over every track point on each tab-swipe frame.
+  final AccelAnalysis? analysis;
+
   final List<TrackPoint> points;
   final SpeedUnit unit;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final cx = AppColors.of(context);
-    final analysis = analyseSmoothness([
-      for (final p in points) (time: p.timestamp, speedMps: p.speedMps),
-    ]);
+    final analysis = this.analysis ??
+        analyseSmoothness([
+          for (final p in points) (time: p.timestamp, speedMps: p.speedMps),
+        ]);
     if (analysis.samples.isEmpty) return const SizedBox.shrink();
 
     // Display-unit acceleration: m/s² → km/h per second → the rider's unit.
