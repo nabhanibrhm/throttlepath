@@ -31,7 +31,7 @@ class DetailAppBar extends StatelessWidget implements PreferredSizeWidget {
   /// Invoked by both the title tap and the menu's first entry.
   final VoidCallback onRename;
 
-  /// Wording for the rename action — "Rename ride" / "Rename leg" / "Rename
+  /// Wording for the rename action — "Rename ride" / "Rename stint" / "Rename
   /// trip". Also the title's semantic hint.
   final String renameTooltip;
 

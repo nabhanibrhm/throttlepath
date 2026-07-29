@@ -22,24 +22,29 @@ const TrackPointSchema = CollectionSchema(
       name: r'altitude',
       type: IsarType.double,
     ),
-    r'latitude': PropertySchema(
+    r'headingDegrees': PropertySchema(
       id: 1,
+      name: r'headingDegrees',
+      type: IsarType.double,
+    ),
+    r'latitude': PropertySchema(
+      id: 2,
       name: r'latitude',
       type: IsarType.double,
     ),
     r'longitude': PropertySchema(
-      id: 2,
+      id: 3,
       name: r'longitude',
       type: IsarType.double,
     ),
-    r'rideId': PropertySchema(id: 3, name: r'rideId', type: IsarType.long),
+    r'rideId': PropertySchema(id: 4, name: r'rideId', type: IsarType.long),
     r'speedMps': PropertySchema(
-      id: 4,
+      id: 5,
       name: r'speedMps',
       type: IsarType.double,
     ),
     r'timestamp': PropertySchema(
-      id: 5,
+      id: 6,
       name: r'timestamp',
       type: IsarType.dateTime,
     ),
@@ -103,11 +108,12 @@ void _trackPointSerialize(
   Map<Type, List<int>> allOffsets,
 ) {
   writer.writeDouble(offsets[0], object.altitude);
-  writer.writeDouble(offsets[1], object.latitude);
-  writer.writeDouble(offsets[2], object.longitude);
-  writer.writeLong(offsets[3], object.rideId);
-  writer.writeDouble(offsets[4], object.speedMps);
-  writer.writeDateTime(offsets[5], object.timestamp);
+  writer.writeDouble(offsets[1], object.headingDegrees);
+  writer.writeDouble(offsets[2], object.latitude);
+  writer.writeDouble(offsets[3], object.longitude);
+  writer.writeLong(offsets[4], object.rideId);
+  writer.writeDouble(offsets[5], object.speedMps);
+  writer.writeDateTime(offsets[6], object.timestamp);
 }
 
 TrackPoint _trackPointDeserialize(
@@ -118,12 +124,13 @@ TrackPoint _trackPointDeserialize(
 ) {
   final object = TrackPoint();
   object.altitude = reader.readDoubleOrNull(offsets[0]);
+  object.headingDegrees = reader.readDoubleOrNull(offsets[1]);
   object.id = id;
-  object.latitude = reader.readDouble(offsets[1]);
-  object.longitude = reader.readDouble(offsets[2]);
-  object.rideId = reader.readLong(offsets[3]);
-  object.speedMps = reader.readDouble(offsets[4]);
-  object.timestamp = reader.readDateTime(offsets[5]);
+  object.latitude = reader.readDouble(offsets[2]);
+  object.longitude = reader.readDouble(offsets[3]);
+  object.rideId = reader.readLong(offsets[4]);
+  object.speedMps = reader.readDouble(offsets[5]);
+  object.timestamp = reader.readDateTime(offsets[6]);
   return object;
 }
 
@@ -137,14 +144,16 @@ P _trackPointDeserializeProp<P>(
     case 0:
       return (reader.readDoubleOrNull(offset)) as P;
     case 1:
-      return (reader.readDouble(offset)) as P;
+      return (reader.readDoubleOrNull(offset)) as P;
     case 2:
       return (reader.readDouble(offset)) as P;
     case 3:
-      return (reader.readLong(offset)) as P;
-    case 4:
       return (reader.readDouble(offset)) as P;
+    case 4:
+      return (reader.readLong(offset)) as P;
     case 5:
+      return (reader.readDouble(offset)) as P;
+    case 6:
       return (reader.readDateTime(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
@@ -552,6 +561,99 @@ extension TrackPointQueryFilter
       return query.addFilterCondition(
         FilterCondition.between(
           property: r'altitude',
+          lower: lower,
+          includeLower: includeLower,
+          upper: upper,
+          includeUpper: includeUpper,
+
+          epsilon: epsilon,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<TrackPoint, TrackPoint, QAfterFilterCondition>
+  headingDegreesIsNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        const FilterCondition.isNull(property: r'headingDegrees'),
+      );
+    });
+  }
+
+  QueryBuilder<TrackPoint, TrackPoint, QAfterFilterCondition>
+  headingDegreesIsNotNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        const FilterCondition.isNotNull(property: r'headingDegrees'),
+      );
+    });
+  }
+
+  QueryBuilder<TrackPoint, TrackPoint, QAfterFilterCondition>
+  headingDegreesEqualTo(double? value, {double epsilon = Query.epsilon}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.equalTo(
+          property: r'headingDegrees',
+          value: value,
+
+          epsilon: epsilon,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<TrackPoint, TrackPoint, QAfterFilterCondition>
+  headingDegreesGreaterThan(
+    double? value, {
+    bool include = false,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.greaterThan(
+          include: include,
+          property: r'headingDegrees',
+          value: value,
+
+          epsilon: epsilon,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<TrackPoint, TrackPoint, QAfterFilterCondition>
+  headingDegreesLessThan(
+    double? value, {
+    bool include = false,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.lessThan(
+          include: include,
+          property: r'headingDegrees',
+          value: value,
+
+          epsilon: epsilon,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<TrackPoint, TrackPoint, QAfterFilterCondition>
+  headingDegreesBetween(
+    double? lower,
+    double? upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.between(
+          property: r'headingDegrees',
           lower: lower,
           includeLower: includeLower,
           upper: upper,
@@ -984,6 +1086,19 @@ extension TrackPointQuerySortBy
     });
   }
 
+  QueryBuilder<TrackPoint, TrackPoint, QAfterSortBy> sortByHeadingDegrees() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'headingDegrees', Sort.asc);
+    });
+  }
+
+  QueryBuilder<TrackPoint, TrackPoint, QAfterSortBy>
+  sortByHeadingDegreesDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'headingDegrees', Sort.desc);
+    });
+  }
+
   QueryBuilder<TrackPoint, TrackPoint, QAfterSortBy> sortByLatitude() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'latitude', Sort.asc);
@@ -1056,6 +1171,19 @@ extension TrackPointQuerySortThenBy
   QueryBuilder<TrackPoint, TrackPoint, QAfterSortBy> thenByAltitudeDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'altitude', Sort.desc);
+    });
+  }
+
+  QueryBuilder<TrackPoint, TrackPoint, QAfterSortBy> thenByHeadingDegrees() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'headingDegrees', Sort.asc);
+    });
+  }
+
+  QueryBuilder<TrackPoint, TrackPoint, QAfterSortBy>
+  thenByHeadingDegreesDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'headingDegrees', Sort.desc);
     });
   }
 
@@ -1140,6 +1268,12 @@ extension TrackPointQueryWhereDistinct
     });
   }
 
+  QueryBuilder<TrackPoint, TrackPoint, QDistinct> distinctByHeadingDegrees() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'headingDegrees');
+    });
+  }
+
   QueryBuilder<TrackPoint, TrackPoint, QDistinct> distinctByLatitude() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(r'latitude');
@@ -1182,6 +1316,12 @@ extension TrackPointQueryProperty
   QueryBuilder<TrackPoint, double?, QQueryOperations> altitudeProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'altitude');
+    });
+  }
+
+  QueryBuilder<TrackPoint, double?, QQueryOperations> headingDegreesProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'headingDegrees');
     });
   }
 

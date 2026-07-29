@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui' show DartPluginRegistrant;
 
 import 'package:flutter_background_service/flutter_background_service.dart';
 
 import '../core/geo.dart';
 import '../core/gps_kalman.dart';
+import '../core/lean.dart';
 import '../data/database_service.dart';
 import '../data/models/ride.dart';
 import '../data/models/track_point.dart';
@@ -42,6 +44,14 @@ const double _kStationaryDopplerMps = 0.8;
 /// off positions, not the reported speed, so it hardens whichever pipeline runs.
 const double _kStationaryWindowSeconds = 5.0;
 const double _kStationarySpeedKmh = 3.0;
+
+/// Baseline (seconds) the live lean estimate differences heading over.
+///
+/// Shorter than the offline analysis's effective window because the filter's
+/// heading is already smoothed, but still long enough that one fix cannot throw the
+/// needle. It does mean the live value *lags* — a corner is half over before the
+/// dial agrees — which is fine for a readout nobody can safely watch mid-corner.
+const double _kLeanWindowSeconds = 3.0;
 
 /// Blackout threshold (seconds). If no usable fix arrives for this long while
 /// recording, GPS is treated as lost (tunnel / train / metal enclosure): the
@@ -115,6 +125,7 @@ class LiveTelemetry {
     this.countdown = 0,
     this.pausedAtMs,
     this.signalLost = false,
+    this.leanDegrees,
   });
 
   final int rideId;
@@ -157,6 +168,15 @@ class LiveTelemetry {
   /// a stalled clock as a bug.
   final bool signalLost;
 
+  /// Live cornering lean estimate in degrees — negative leans left — or null when
+  /// the bike is below [kMinLeanSpeedKmh], the heading window is too short, or the
+  /// value came out physically implausible.
+  ///
+  /// Null is the normal resting state, not an error: most of a ride is upright and
+  /// slow enough that there is nothing honest to show. The backdrop says so rather
+  /// than parking a needle at zero as though it had measured zero.
+  final double? leanDegrees;
+
   /// How long the ride has been paused, or null when it isn't.
   Duration? get pausedFor {
     final ms = pausedAtMs;
@@ -186,6 +206,7 @@ class LiveTelemetry {
         countdown: (m['countdown'] as num?)?.toInt() ?? 0,
         pausedAtMs: (m['pausedAtMs'] as num?)?.toInt(),
         signalLost: (m['signalLost'] as bool?) ?? false,
+        leanDegrees: (m['leanDegrees'] as num?)?.toDouble(),
       );
 }
 
@@ -317,6 +338,13 @@ Future<void> onStart(ServiceInstance service) async {
   // Rolling window of recent smoothed fixes (time, lat, lon) for the windowed
   // standstill guard — see _kStationaryWindowSeconds.
   final recentFixes = <(DateTime, double, double)>[];
+  // Rolling window of (time, smoothed heading) for the live lean estimate. Kept
+  // separate from recentFixes because it is cleared on different events and spans
+  // a different window.
+  final recentHeadings = <(DateTime, double)>[];
+  // Current live lean estimate in degrees (signed: negative leans left), or null
+  // when the bike is too slow or the window too short to say.
+  double? currentLeanDegrees;
   var movingSeconds = 0;
   var pointCount = 0;
   var rejectedStreak = 0;
@@ -395,6 +423,7 @@ Future<void> onStart(ServiceInstance service) async {
       'countdown': countdown,
       'pausedAtMs': pauseStartedAt?.millisecondsSinceEpoch,
       'signalLost': signalLostAt != null,
+      'leanDegrees': currentLeanDegrees,
     });
   }
 
@@ -479,6 +508,10 @@ Future<void> onStart(ServiceInstance service) async {
       currentSpeedKmh = 0;
       speedAtLastFix = 0;
       recentFixes.clear();
+      // A heading discontinuity here would fabricate a turn, so the live
+      // lean window resets alongside the position window.
+      recentHeadings.clear();
+      currentLeanDegrees = null;
       movingSeconds = 0;
       pointCount = 0;
       rejectedStreak = 0;
@@ -676,6 +709,10 @@ Future<void> onStart(ServiceInstance service) async {
         smoothLat = null;
         smoothLon = null;
         recentFixes.clear();
+        // A heading discontinuity here would fabricate a turn, so the live
+        // lean window resets alongside the position window.
+        recentHeadings.clear();
+        currentLeanDegrees = null;
         rejectedStreak = 0;
         // A blackout that ended with a far jump — bank the frozen time so it
         // stays out of duration/avg.
@@ -702,6 +739,10 @@ Future<void> onStart(ServiceInstance service) async {
         smoothLat = null;
         smoothLon = null;
         recentFixes.clear();
+        // A heading discontinuity here would fabricate a turn, so the live
+        // lean window resets alongside the position window.
+        recentHeadings.clear();
+        currentLeanDegrees = null;
         if (signalLostAt != null) {
           totalPaused += now.difference(signalLostAt!);
           signalLostAt = null;
@@ -771,7 +812,50 @@ Future<void> onStart(ServiceInstance service) async {
       speedAtLastFix = currentSpeedKmh;
       if (currentSpeedKmh > maxSpeedKmh) maxSpeedKmh = currentSpeedKmh;
 
-      // Persist the raw fix as the ground-truth track point.
+      // Live lean estimate, for the Record screen's lean backdrop.
+      //
+      // Uses the *filter's* heading rather than the fix's own course: the velocity
+      // vector is already smoothed, which is what makes a per-fix estimate steady
+      // enough to point a needle at. Same physics and the same speed floor as the
+      // offline analysis, and it borrows `signedTurnDegrees` from `core/lean.dart`
+      // rather than restating the wraparound rule — a 359°→1° crossing must read as
+      // a 2° correction in both places or the live dial and the saved chart would
+      // disagree about the same corner.
+      //
+      // This is honestly a soft number: it lags by the window, and a rider cannot
+      // look at a phone mid-corner anyway. It is for the pillion and for watching
+      // a replay, which is why nothing depends on it.
+      recentHeadings.add((now, kalman.headingDegrees));
+      while (recentHeadings.length > 1 &&
+          now.difference(recentHeadings.first.$1).inMilliseconds / 1000.0 >
+              _kLeanWindowSeconds) {
+        recentHeadings.removeAt(0);
+      }
+      currentLeanDegrees = null;
+      if (currentSpeedKmh >= kMinLeanSpeedKmh && recentHeadings.length >= 2) {
+        final oldest = recentHeadings.first;
+        final spanS = now.difference(oldest.$1).inMilliseconds / 1000.0;
+        // Needs most of the window before it means anything, or the first two fixes
+        // after a reset would swing the needle on a 1-second baseline.
+        if (spanS >= _kLeanWindowSeconds * 0.6) {
+          final omega = signedTurnDegrees(oldest.$2, kalman.headingDegrees) *
+              (math.pi / 180.0) /
+              spanS;
+          final vMps = currentSpeedKmh / 3.6;
+          final magnitude =
+              math.atan((vMps * omega.abs()) / kGravity) * 180.0 / math.pi;
+          if (magnitude <= kMaxPlausibleLeanDegrees) {
+            currentLeanDegrees = omega < 0 ? -magnitude : magnitude;
+          }
+        }
+      }
+
+      // Persist the raw fix as the ground-truth track point. The heading is kept
+      // as reported (not the `useDoppler` variant fused above) because the lean
+      // analysis applies its own, much higher, speed floor — storing null here
+      // for anything under _kDopplerMinSpeedMps would discard usable course data
+      // for the 1–20 km/h band that a future estimator might want.
+      final heading = fix.headingDegrees;
       await db.addTrackPoint(
         TrackPoint()
           ..rideId = rideId
@@ -779,6 +863,8 @@ Future<void> onStart(ServiceInstance service) async {
           ..longitude = fix.longitude
           ..altitude = fix.altitude
           ..speedMps = fix.speedMps
+          ..headingDegrees =
+              (heading.isFinite && heading >= 0 && heading < 360) ? heading : null
           ..timestamp = fix.timestamp,
       );
       pointCount++;
@@ -823,6 +909,10 @@ Future<void> onStart(ServiceInstance service) async {
     pauseStartedAt = DateTime.now();
     currentSpeedKmh = 0.0;
     recentFixes.clear();
+    // A heading discontinuity here would fabricate a turn, so the live
+    // lean window resets alongside the position window.
+    recentHeadings.clear();
+    currentLeanDegrees = null;
     positionSub?.cancel();
     positionSub = null;
     lastLat = null;

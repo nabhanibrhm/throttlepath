@@ -44,7 +44,7 @@ class RideShare {
     List<TrackPoint> points,
     SpeedUnit unit,
     ShareLayout layout,
-    List<int> legStarts,
+    List<int> stintStarts,
   ) async {
     // The off-screen capture only waits a couple of frames, so make sure the
     // brand logo is decoded into the image cache first (otherwise it can render
@@ -60,7 +60,7 @@ class RideShare {
         points: points,
         unit: unit,
         layout: layout,
-        legStarts: legStarts,
+        stintStarts: stintStarts,
       ),
       logicalSize: _canvas,
       pixelRatio: _pixelRatio,
@@ -91,10 +91,10 @@ class RideShare {
     required List<TrackPoint> points,
     required SpeedUnit unit,
     required ShareLayout layout,
-    List<int> legStarts = const [],
+    List<int> stintStarts = const [],
   }) async {
     final pngBytes =
-        await _renderPng(context, ride, points, unit, layout, legStarts);
+        await _renderPng(context, ride, points, unit, layout, stintStarts);
     final file = await _writeToCache(ride, pngBytes);
 
     // Hand off to the Android host, which builds the content:// URI via
@@ -125,10 +125,10 @@ class RideShare {
     required List<TrackPoint> points,
     required SpeedUnit unit,
     required ShareLayout layout,
-    List<int> legStarts = const [],
+    List<int> stintStarts = const [],
   }) async {
     final pngBytes =
-        await _renderPng(context, ride, points, unit, layout, legStarts);
+        await _renderPng(context, ride, points, unit, layout, stintStarts);
     final file = await _writeToCache(ride, pngBytes);
     final name = ride.name?.trim();
     await _channel.invokeMethod('shareFile', {
@@ -152,10 +152,10 @@ class RideShare {
     required List<TrackPoint> points,
     required SpeedUnit unit,
     required ShareLayout layout,
-    List<int> legStarts = const [],
+    List<int> stintStarts = const [],
   }) async {
     final pngBytes =
-        await _renderPng(context, ride, points, unit, layout, legStarts);
+        await _renderPng(context, ride, points, unit, layout, stintStarts);
     final file = await _writeToCache(ride, pngBytes);
 
     try {

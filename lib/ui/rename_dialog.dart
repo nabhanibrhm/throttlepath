@@ -6,7 +6,7 @@ import '../theme/app_theme.dart';
 /// replaces it). Returns the trimmed name, or null when cancelled or left empty
 /// — callers treat null as "leave the name alone".
 ///
-/// Shared by the rename actions on a ride, a trip leg and a trip.
+/// Shared by the rename actions on a ride, a trip stint and a trip.
 Future<String?> showRenameDialog(
   BuildContext context, {
   required String title,

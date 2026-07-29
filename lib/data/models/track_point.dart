@@ -27,6 +27,22 @@ class TrackPoint {
   /// Instantaneous ground speed, in meters/second, as reported by the fix.
   double speedMps = 0;
 
+  /// Course over ground, in degrees (0 = north, clockwise), as reported by the
+  /// fix — Doppler-derived on the raw GNSS pipeline, so far less noisy than a
+  /// bearing differenced from two stored positions.
+  ///
+  /// Kept because the lean-angle estimate needs a yaw rate, and differencing
+  /// positions to get one was measured (`tool/lean_probe.dart`) to report 54° of
+  /// lean at highway speed — noise, not riding. Null when the platform reported
+  /// nothing usable, and on every ride recorded before this field existed; those
+  /// fall back to position-bearing at lower confidence.
+  ///
+  /// Beware: Android reports 0.0 both for "due north" and for "no bearing
+  /// available", and the two are indistinguishable here. The analysis guards
+  /// against it with a speed floor rather than by special-casing 0 — bearing is
+  /// reliably present whenever the bike is actually moving.
+  double? headingDegrees;
+
   /// Capture time of this fix. Indexed so points replay in chronological order.
   @Index()
   late DateTime timestamp;

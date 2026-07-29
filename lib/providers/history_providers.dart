@@ -12,7 +12,7 @@ import '../services/permission_service.dart';
 import '../services/route_derivation.dart';
 
 /// Standalone rides (not part of any trip), newest first — the flat entries in
-/// History. Trip legs render under their trip instead. Auto-disposes so
+/// History. Trip stints render under their trip instead. Auto-disposes so
 /// re-entering History always refetches (picking up rides saved since, dropping
 /// any deleted in-screen via `ref.invalidate`).
 final rideHistoryProvider = FutureProvider.autoDispose<List<Ride>>((ref) {
@@ -56,7 +56,7 @@ final rideTrackProvider = FutureProvider.autoDispose
     });
 
 /// A trip paired with its combined stats — what a History trip entry needs to
-/// render (name, leg count, distance/time). Used for both open and finished
+/// render (name, stint count, distance/time). Used for both open and finished
 /// trips.
 class TripSummary {
   const TripSummary(this.trip, this.stats);
@@ -68,8 +68,8 @@ Future<List<TripSummary>> _summarise(List<Trip> trips) async {
   final db = DatabaseService.instance;
   final summaries = <TripSummary>[];
   for (final trip in trips) {
-    final legs = await db.getLegsForTrip(trip.id);
-    summaries.add(TripSummary(trip, TripStats.fromLegs(legs)));
+    final stints = await db.getStintsForTrip(trip.id);
+    summaries.add(TripSummary(trip, TripStats.fromStints(stints)));
   }
   return summaries;
 }
@@ -89,23 +89,23 @@ final finishedTripsProvider =
   return _summarise(await DatabaseService.instance.getFinishedTrips());
 });
 
-/// One leg (ride) paired with its recorded track — the unit the combined
-/// trip-detail map draws (each leg its own colored polyline).
-class LegTrack {
-  const LegTrack(this.leg, this.track);
-  final Ride leg;
+/// One stint (ride) paired with its recorded track — the unit the combined
+/// trip-detail map draws (each stint its own colored polyline).
+class StintTrack {
+  const StintTrack(this.stint, this.track);
+  final Ride stint;
   final List<TrackPoint> track;
 }
 
-/// A trip's legs (oldest-first) each with its recorded track, keyed by trip id.
-/// Powers the trip-detail combined map and per-leg list.
-final tripLegsProvider = FutureProvider.autoDispose
-    .family<List<LegTrack>, int>((ref, tripId) async {
+/// A trip's stints (oldest-first) each with its recorded track, keyed by trip id.
+/// Powers the trip-detail combined map and per-stint list.
+final tripStintsProvider = FutureProvider.autoDispose
+    .family<List<StintTrack>, int>((ref, tripId) async {
   final db = DatabaseService.instance;
-  final legs = await db.getLegsForTrip(tripId);
-  final out = <LegTrack>[];
-  for (final leg in legs) {
-    out.add(LegTrack(leg, await db.getTrackPointsForRide(leg.id)));
+  final stints = await db.getStintsForTrip(tripId);
+  final out = <StintTrack>[];
+  for (final stint in stints) {
+    out.add(StintTrack(stint, await db.getTrackPointsForRide(stint.id)));
   }
   return out;
 });
@@ -114,7 +114,7 @@ final tripLegsProvider = FutureProvider.autoDispose
 /// for the Record screen to nudge "continue this trip?".
 const double _nudgeRadiusMeters = 300;
 
-/// The nearest open trip whose last leg ended within [_nudgeRadiusMeters] of the
+/// The nearest open trip whose last stint ended within [_nudgeRadiusMeters] of the
 /// rider's current position, or null (no open trip nearby, location denied, or
 /// no fix). Best-effort and read-only — powers the Record-screen proximity
 /// nudge. Returns the newest match when several qualify.
@@ -134,14 +134,14 @@ final nearbyOpenTripProvider =
 
   final db = DatabaseService.instance;
   for (final trip in await db.getOpenTrips()) {
-    final legs = await db.getLegsForTrip(trip.id);
-    if (legs.isEmpty) continue;
-    final end = await db.getLastTrackPoint(legs.last.id);
+    final stints = await db.getStintsForTrip(trip.id);
+    if (stints.isEmpty) continue;
+    final end = await db.getLastTrackPoint(stints.last.id);
     if (end == null) continue;
     final meters = haversineMeters(
         pos.latitude, pos.longitude, end.latitude, end.longitude);
     if (meters <= _nudgeRadiusMeters) {
-      return TripSummary(trip, TripStats.fromLegs(legs));
+      return TripSummary(trip, TripStats.fromStints(stints));
     }
   }
   return null;

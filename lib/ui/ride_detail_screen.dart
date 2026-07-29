@@ -4,6 +4,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/geo.dart';
+import '../core/lean.dart';
 import '../core/units.dart';
 import '../data/database_service.dart';
 import '../data/models/ride.dart';
@@ -14,6 +15,7 @@ import '../theme/app_theme.dart';
 import 'chart_frame.dart';
 import 'detail_app_bar.dart';
 import 'elevation_speed_chart.dart';
+import 'lean_chart.dart';
 import 'no_track_notice.dart';
 import 'place_route_label.dart';
 import 'rename_dialog.dart';
@@ -41,22 +43,22 @@ class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
   /// leaving the screen.
   late String? _name = widget.ride.name;
 
-  /// True when this ride is a leg of a trip — only the wording changes.
-  bool get _isLeg => widget.ride.tripId != null;
+  /// True when this ride is a stint of a trip — only the wording changes.
+  bool get _isStint => widget.ride.tripId != null;
 
   String get _title => _name?.trim().isNotEmpty == true
       ? _name!.trim()
-      : (_isLeg ? 'Untitled leg' : 'Untitled ride');
+      : (_isStint ? 'Untitled stint' : 'Untitled ride');
 
-  /// Renames this ride (or leg). Renaming a leg never touches its trip's name —
+  /// Renames this ride (or stint). Renaming a stint never touches its trip's name —
   /// the two are independent.
   Future<void> _rename() async {
     final next = await showRenameDialog(
       context,
-      title: _isLeg ? 'Rename leg' : 'Rename ride',
+      title: _isStint ? 'Rename stint' : 'Rename ride',
       initial: _name,
-      hint: _isLeg
-          ? 'Leg name (e.g. Berangkat)'
+      hint: _isStint
+          ? 'Stint name (e.g. Berangkat)'
           : 'Ride name (e.g. Morning commute)',
     );
     if (next == null) return;
@@ -65,7 +67,7 @@ class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
     ref.invalidate(rideHistoryProvider);
     final tripId = widget.ride.tripId;
     if (tripId != null) {
-      ref.invalidate(tripLegsProvider(tripId));
+      ref.invalidate(tripStintsProvider(tripId));
       ref.invalidate(openTripsProvider);
       ref.invalidate(finishedTripsProvider);
     }
@@ -101,7 +103,7 @@ class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
       appBar: DetailAppBar(
         title: _title,
         onRename: _rename,
-        renameTooltip: _isLeg ? 'Rename leg' : 'Rename ride',
+        renameTooltip: _isStint ? 'Rename stint' : 'Rename ride',
         busy: _sharing,
         onShare: trackAsync.hasValue ? _share : null,
         shareTooltip: 'Share ride',
@@ -360,6 +362,15 @@ class _ChartTabsState extends State<_ChartTabs>
   /// Measured natural content height per tab index.
   final _heights = <int, double>{};
 
+  /// The lean estimate for the current track, computed once when the track
+  /// changes rather than per build.
+  ///
+  /// Unlike [_hasElevation] — a cheap scan of a field already in memory —
+  /// deciding whether there is a lean tab means running the whole estimator, which
+  /// walks every point doing trigonometry. Recomputing that inside `build` would
+  /// put two full passes over the track on every frame of a tab swipe.
+  LeanAnalysis _lean = LeanAnalysis.empty;
+
   /// Mirrors [ElevationSpeedChart]'s own guard so the elevation tab is only
   /// offered when it would actually render (>= 2 altitude fixes, >= 2 m swing).
   bool get _hasElevation {
@@ -382,18 +393,23 @@ class _ChartTabsState extends State<_ChartTabs>
         'Speed',
         'Zones',
         'Smoothness',
+        if (_lean.hasEstimate) 'Lean',
         if (_hasElevation) 'Elevation',
       ];
 
   @override
   void initState() {
     super.initState();
+    _lean = LeanChart.analyse(widget.points);
     _syncController();
   }
 
   @override
   void didUpdateWidget(covariant _ChartTabs old) {
     super.didUpdateWidget(old);
+    if (!identical(old.points, widget.points)) {
+      _lean = LeanChart.analyse(widget.points);
+    }
     _syncController();
   }
 
@@ -449,6 +465,7 @@ class _ChartTabsState extends State<_ChartTabs>
         points: widget.points,
         unit: widget.unit,
       ),
+      if (_lean.hasEstimate) LeanChart(analysis: _lean, unit: widget.unit),
       if (_hasElevation)
         ElevationSpeedChart(points: widget.points, unit: widget.unit),
     ];

@@ -69,7 +69,7 @@ class GeocodeBackfill {
   /// One-time, user-initiated re-geocode of EVERY ride's start/end place names
   /// to the current label format — e.g. upgrading old "subdistrict"-only labels
   /// to "subdistrict, city". Unlike [run], this re-attempts rides that already
-  /// have names (trip legs included, since [DatabaseService.getAllRides] spans
+  /// have names (trip stints included, since [DatabaseService.getAllRides] spans
   /// them).
   ///
   /// Best-effort and online-only: a ride whose lookup fails keeps its existing

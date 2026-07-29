@@ -78,6 +78,7 @@ class SettingsScreen extends ConsumerWidget {
             icon: switch (view) {
               RecordView.map => Icons.map_outlined,
               RecordView.chart => Icons.show_chart,
+              RecordView.lean => Icons.motorcycle_outlined,
               RecordView.none => Icons.visibility_off_outlined,
             },
             title: 'Backdrop',

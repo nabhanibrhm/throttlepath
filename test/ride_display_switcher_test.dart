@@ -34,7 +34,7 @@ void main() {
   testWidgets('every backdrop and every gauge style has its own segment',
       (t) async {
     // The guard against someone re-flattening this into a single four-way
-    // RideDisplayMode: that would drop three of the six combinations, and the
+    // RideDisplayMode: that would drop most of the eight combinations, and the
     // first casualty is map + dial. If a value is added to either enum without
     // a segment, this fails.
     await t.pumpWidget(_host());
@@ -46,7 +46,7 @@ void main() {
     }
   });
 
-  testWidgets('the two axes are independent — all six pairings render',
+  testWidgets('the two axes are independent — all eight pairings render',
       (t) async {
     for (final v in RecordView.values) {
       for (final s in SpeedGaugeStyle.values) {
@@ -112,7 +112,7 @@ void main() {
 
   testWidgets('it fits its width in both themes without overflowing',
       (t) async {
-    // Five segments of text in one row is the tightest thing on the sheet;
+    // Six segments of text in one row is the tightest thing on the sheet;
     // an overflow here would paint a yellow-and-black bar over the telemetry.
     for (final theme in [buildDarkTheme(), buildLightTheme()]) {
       await t.pumpWidget(_host(theme: theme));
@@ -120,7 +120,11 @@ void main() {
     }
   });
 
-  test('the enums still describe six distinct states', () {
-    expect(RecordView.values.length * SpeedGaugeStyle.values.length, 6);
+  test('the enums still describe eight distinct states', () {
+    // Was six until the live Lean backdrop landed. The number matters because the
+    // standing temptation is to flatten these two axes into one four-way enum,
+    // which would silently delete most of the reachable combinations — map + dial
+    // among them, which is what the rider actually uses.
+    expect(RecordView.values.length * SpeedGaugeStyle.values.length, 8);
   });
 }

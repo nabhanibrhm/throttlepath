@@ -63,7 +63,7 @@ TripSummary makeTrip({
   required int id,
   required DateTime createdAt,
   String? name,
-  required List<Ride> legs,
+  required List<Ride> stints,
   bool finished = true,
 }) {
   final trip = Trip()
@@ -71,7 +71,7 @@ TripSummary makeTrip({
     ..name = name
     ..createdAt = createdAt
     ..finishedAt = finished ? createdAt.add(const Duration(days: 1)) : null;
-  return TripSummary(trip, TripStats.fromLegs(legs));
+  return TripSummary(trip, TripStats.fromStints(stints));
 }
 
 /// Loads the app's bundled Inter so text is measured with the metrics the phone
@@ -245,8 +245,8 @@ void main() {
     expect(find.text('No rides yet this week.'), findsOneWidget);
   });
 
-  testWidgets('a trip is one row until asked, then shows its legs', (t) async {
-    final legs = [
+  testWidgets('a trip is one row until asked, then shows its stints', (t) async {
+    final stints = [
       makeRide(id: 10, start: july, name: 'Out', tripId: 5, meters: 12000),
       makeRide(
           id: 11,
@@ -258,21 +258,21 @@ void main() {
     await t.pumpWidget(host(
       rides: const [],
       finishedTrips: [
-        makeTrip(id: 5, createdAt: july, name: 'Weekend run', legs: legs),
+        makeTrip(id: 5, createdAt: july, name: 'Weekend run', stints: stints),
       ],
     ));
     await t.pumpAndSettle();
 
     expect(find.text('Weekend run'), findsOneWidget);
-    expect(find.text('TRIP · 2 legs'), findsOneWidget);
+    expect(find.text('TRIP · 2 stints'), findsOneWidget);
     // Collapsed by default — the point of a trip is that it reads as one thing.
     expect(find.text('Out'), findsNothing);
 
-    await t.tap(find.text('Show 2 legs'));
+    await t.tap(find.text('Show 2 stints'));
     await t.pumpAndSettle();
     expect(find.text('Out'), findsOneWidget);
     expect(find.text('Back'), findsOneWidget);
-    expect(find.text('Hide legs'), findsOneWidget);
+    expect(find.text('Hide stints'), findsOneWidget);
     expect(t.takeException(), isNull);
   });
 
@@ -285,7 +285,7 @@ void main() {
           id: 5,
           createdAt: july,
           name: 'A trip',
-          legs: [makeRide(id: 10, start: july, name: 'Leg', tripId: 5)],
+          stints: [makeRide(id: 10, start: july, name: 'Stint', tripId: 5)],
         ),
       ],
     ));
@@ -389,7 +389,7 @@ void main() {
     for (final theme in [buildDarkTheme(), buildLightTheme()]) {
       await t.pumpWidget(host(
         // A fresh key per theme: without it the trip card's expand state
-        // survives the re-pump and the second pass finds "Hide legs" instead.
+        // survives the re-pump and the second pass finds "Hide stints" instead.
         key: ValueKey(theme.brightness),
         theme: theme,
         week: weekWith(),
@@ -399,7 +399,7 @@ void main() {
             createdAt: july,
             name: 'An open trip with a rather long name indeed',
             finished: false,
-            legs: [makeRide(id: 20, start: july, name: 'Leg one', tripId: 6)],
+            stints: [makeRide(id: 20, start: july, name: 'Stint one', tripId: 6)],
           ),
         ],
         finishedTrips: [
@@ -407,11 +407,11 @@ void main() {
             id: 5,
             createdAt: july,
             name: 'A finished trip whose name also runs on and on',
-            legs: [
+            stints: [
               makeRide(
                   id: 10,
                   start: july,
-                  name: 'A leg with an extremely long descriptive name',
+                  name: 'A stint with an extremely long descriptive name',
                   startPlace: 'Bandung Wetan, Kota Bandung',
                   endPlace: 'Lembang, Kabupaten Bandung Barat',
                   tripId: 5),
@@ -441,15 +441,15 @@ void main() {
       // `.first` is the CustomScrollView's own Scrollable; the filter chips'
       // horizontal ListView is nested inside it and comes later.
       await t.scrollUntilVisible(
-        find.text('Show 1 leg'),
+        find.text('Show 1 stint'),
         140,
         scrollable: find.byType(Scrollable).first,
       );
       await t.pumpAndSettle();
-      await t.tap(find.text('Show 1 leg'));
+      await t.tap(find.text('Show 1 stint'));
       await t.pumpAndSettle();
       expect(t.takeException(), isNull,
-          reason: 'nested legs overflowed on ${theme.brightness}');
+          reason: 'nested stints overflowed on ${theme.brightness}');
     }
   });
 

@@ -42,7 +42,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       ref.invalidate(openTripsProvider);
       // Also the finished trips: a trip just closed from the summary screen
       // moves out of `openTripsProvider` into this one, and without a refetch its
-      // legs (which carry a tripId, so they're excluded from the standalone list)
+      // stints (which carry a tripId, so they're excluded from the standalone list)
       // would vanish from History entirely.
       ref.invalidate(finishedTripsProvider);
       // This week's totals move with every save, so the week strip has to refetch

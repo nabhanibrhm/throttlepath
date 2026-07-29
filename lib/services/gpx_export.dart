@@ -33,8 +33,8 @@ class GpxExport {
 
   /// Serialises [points] as a GPX document.
   ///
-  /// [legStarts] marks the index in [points] where each leg after the first
-  /// begins; each leg becomes its own `<trkseg>`, which is exactly what segments
+  /// [stintStarts] marks the index in [points] where each stint after the first
+  /// begins; each stint becomes its own `<trkseg>`, which is exactly what segments
   /// mean in GPX — a break in recording, not a break in the journey. A
   /// single-ride export passes an empty list and gets one segment.
   ///
@@ -42,7 +42,7 @@ class GpxExport {
   static String buildGpx({
     required Ride ride,
     required List<TrackPoint> points,
-    List<int> legStarts = const [],
+    List<int> stintStarts = const [],
   }) {
     final name = ride.name?.trim();
     final b = StringBuffer()
@@ -57,9 +57,9 @@ class GpxExport {
       ..writeln('    <name>${xmlEscape(name?.isNotEmpty == true ? name! : 'Ride')}</name>')
       ..writeln('    <type>motorcycling</type>');
 
-    // Segment boundaries, deduplicated and in order: a leg start of 0 is implied
+    // Segment boundaries, deduplicated and in order: a stint start of 0 is implied
     // by the first segment, and an out-of-range one would produce an empty seg.
-    final breaks = legStarts
+    final breaks = stintStarts
         .where((i) => i > 0 && i < points.length)
         .toSet()
         .toList()
@@ -118,7 +118,7 @@ class GpxExport {
   static Future<void> share({
     required Ride ride,
     required List<TrackPoint> points,
-    List<int> legStarts = const [],
+    List<int> stintStarts = const [],
   }) async {
     if (points.isEmpty) {
       throw StateError('Nothing to export — this ride has no recorded track.');
@@ -128,7 +128,7 @@ class GpxExport {
     if (!await dir.exists()) await dir.create(recursive: true);
     final file = File('${dir.path}/${fileNameFor(ride)}');
     await file.writeAsString(
-      buildGpx(ride: ride, points: points, legStarts: legStarts),
+      buildGpx(ride: ride, points: points, stintStarts: stintStarts),
       flush: true,
     );
 

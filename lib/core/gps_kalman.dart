@@ -113,6 +113,18 @@ class GpsKalmanFilter {
   /// Smoothed ground speed in metres per second.
   double get speedMps => math.sqrt(_east.vel * _east.vel + _north.vel * _north.vel);
 
+  /// Smoothed course over ground in degrees (0 = north, clockwise), read straight
+  /// off the filter's velocity vector.
+  ///
+  /// Free — the filter already tracks east/north velocity — and much steadier than
+  /// differencing raw positions, which is what makes a *live* lean estimate viable
+  /// at all. Meaningless at a standstill, where the velocity vector is noise, so
+  /// callers must gate it on speed.
+  double get headingDegrees {
+    final deg = math.atan2(_east.vel, _north.vel) * 180.0 / math.pi;
+    return deg < 0 ? deg + 360.0 : deg;
+  }
+
   /// Smoothed ground speed in km/h.
   double get speedKmh => speedMps * 3.6;
 }

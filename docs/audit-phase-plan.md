@@ -281,7 +281,7 @@ class missing on this API-28 device, with a sync fallback.
       at); destinations are a 54dp row of three. The old flow made them commit to a
       postage-stamp thumbnail and *then* answer a question they hadn't been asked.
 - [x] 4.9 GPX 1.1 export (`lib/services/gpx_export.dart`) — one `<trkseg>` per trip
-      leg, `<ele>` only where a fix reported one, speed in `<extensions>` (1.1
+      stint, `<ele>` only where a fix reported one, speed in `<extensions>` (1.1
       dropped `<speed>` from `trkpt`). Needed **one** new Kotlin method,
       `shareFile(path, mimeType, title)`: the existing `shareToInstagram` is a
       targeted ADD_TO_STORY intent with an explicit package grant, which GPX has no
@@ -321,9 +321,9 @@ Logcat clean of overflows and Dart exceptions.
 - [x] 5.4 Card hierarchy: name → distance → **route sparkline** → one quiet metrics
       line. No red anywhere in a row; peak carries the neutral `peak` token.
 - [x] 5.5 Trips are a bracketed parent (a 3dp amber edge down the left, spanning the
-      header via `IntrinsicHeight`) that expands in place to nested legs on a
-      numbered connector — the last leg's line stops at its own node, since a line
-      running past it implies another leg is coming.
+      header via `IntrinsicHeight`) that expands in place to nested stints on a
+      numbered connector — the last stint's line stops at its own node, since a line
+      running past it implies another stint is coming.
 - [x] 5.6 Swipe reveals a **labelled** red Delete; the row leaves at once and a 6s
       Undo snackbar is the safety net. Nothing reaches the DB until that window
       closes — and `dispose` commits any pending delete, so a rider who swipes and
@@ -430,7 +430,7 @@ backfill path over 25 real rides is what proves the derivation, and it does look
 - [x] 6.10 New `lib/ui/detail_app_bar.dart`, used by both detail screens: back ·
       title · share · overflow. Rename is now **tap the title** on both (ride detail
       had a pencil and no menu; trip detail had a menu and no pencil), with a menu
-      entry as the discoverable path. "Reopen trip" → **"Add the next leg"**.
+      entry as the discoverable path. "Reopen trip" → **"Add the next stint"**.
 
 ### One crash only the test caught
 

@@ -100,5 +100,53 @@ void main() {
       expect(lat, closeTo(2, 1e-9));
       expect(lon, closeTo(2, 1e-9));
     });
+
+    group('smoothed heading', () {
+      // Read off the filter's own velocity vector, which is what makes the live
+      // lean estimate on the Record screen viable — differencing raw positions is
+      // far too noisy to point a needle at.
+
+      /// Feeds a straight run on [bearing] at [speedMps] and returns the filter.
+      GpsKalmanFilter runStraight(double bearing, {double speedMps = 20}) {
+        final kf = GpsKalmanFilter();
+        final rad = bearing * math.pi / 180.0;
+        final metersPerDegLon = metersPerDegLat * math.cos(0.0);
+        for (var i = 0; i < 40; i++) {
+          final north = math.cos(rad) * speedMps * i;
+          final east = math.sin(rad) * speedMps * i;
+          kf.update(
+            lat: north / metersPerDegLat,
+            lon: east / metersPerDegLon,
+            accuracyMeters: 5,
+            timeMs: i * 1000.0,
+            speed: speedMps,
+            speedAccuracy: 0.5,
+            headingDegrees: bearing,
+          );
+        }
+        return kf;
+      }
+
+      test('reports the course being travelled', () {
+        for (final bearing in [0.0, 45.0, 90.0, 180.0, 270.0]) {
+          final got = runStraight(bearing).headingDegrees;
+          // Compare as a circular difference so 359.9 vs 0 is not a 360 error.
+          var diff = (got - bearing).abs() % 360.0;
+          if (diff > 180) diff = 360 - diff;
+          expect(diff, lessThan(3.0), reason: 'bearing $bearing read as $got');
+        }
+      });
+
+      test('always reports a positive bearing, never a negative one', () {
+        // atan2 returns (-pi, pi]; a course of 270 must read 270, not -90, or the
+        // wraparound maths downstream would see a phantom half-turn.
+        expect(runStraight(270).headingDegrees, greaterThanOrEqualTo(0));
+        expect(runStraight(270).headingDegrees, lessThan(360));
+      });
+
+      test('is safe to read before any fix', () {
+        expect(GpsKalmanFilter().headingDegrees, isNotNaN);
+      });
+    });
   });
 }

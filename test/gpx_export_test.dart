@@ -97,16 +97,16 @@ void main() {
       expect(gpx, contains('<speed>18.75</speed>'));
     });
 
-    group('trip legs', () {
+    group('trip stints', () {
       final points = [
         for (var i = 0; i < 6; i++) point(-6.9 + i * 0.001, 107.6),
       ];
 
-      test('each leg becomes its own segment', () {
+      test('each stint becomes its own segment', () {
         final gpx = GpxExport.buildGpx(
           ride: ride(name: 'Weekend trip'),
           points: points,
-          legStarts: const [2, 4],
+          stintStarts: const [2, 4],
         );
         expect('<trkseg>'.allMatches(gpx).length, 3);
         expect('<trkpt'.allMatches(gpx).length, 6);
@@ -114,16 +114,16 @@ void main() {
 
       test('a leading zero is implied, not a second empty segment', () {
         final gpx = GpxExport.buildGpx(
-            ride: ride(), points: points, legStarts: const [0, 3]);
+            ride: ride(), points: points, stintStarts: const [0, 3]);
         expect('<trkseg>'.allMatches(gpx).length, 2);
       });
 
       test('duplicate and out-of-range boundaries are ignored', () {
-        // Untrusted input: legStarts is assembled by the caller from leg lengths.
+        // Untrusted input: stintStarts is assembled by the caller from stint lengths.
         final gpx = GpxExport.buildGpx(
           ride: ride(),
           points: points,
-          legStarts: const [3, 3, 99, -1],
+          stintStarts: const [3, 3, 99, -1],
         );
         expect('<trkseg>'.allMatches(gpx).length, 2);
         expect('<trkpt'.allMatches(gpx).length, 6);
@@ -131,7 +131,7 @@ void main() {
 
       test('unsorted boundaries still produce segments in order', () {
         final gpx = GpxExport.buildGpx(
-            ride: ride(), points: points, legStarts: const [4, 2]);
+            ride: ride(), points: points, stintStarts: const [4, 2]);
         expect('<trkseg>'.allMatches(gpx).length, 3);
         expect('<trkpt'.allMatches(gpx).length, 6);
       });

@@ -21,9 +21,9 @@ import 'ride_detail_screen.dart';
 import 'share_flow.dart';
 import 'tracking_map_screen.dart' show basemapUrl;
 
-/// Distinct per-leg route hues, cycled by leg index. Theme-independent so the
-/// legs stay tellable apart on both the light and dark basemaps.
-const _legColors = <Color>[
+/// Distinct per-stint route hues, cycled by stint index. Theme-independent so the
+/// stints stay tellable apart on both the light and dark basemaps.
+const _stintColors = <Color>[
   Color(0xFFFFB300), // amber
   Color(0xFF29B6F6), // light blue
   Color(0xFF66BB6A), // green
@@ -32,10 +32,10 @@ const _legColors = <Color>[
   Color(0xFFEC407A), // pink
 ];
 
-Color _legColor(int i) => _legColors[i % _legColors.length];
+Color _stintColor(int i) => _stintColors[i % _stintColors.length];
 
-/// Detail view for a whole trip: every leg drawn on one map (each its own hue),
-/// combined stats, and the ordered list of legs (tap one to open it as a ride).
+/// Detail view for a whole trip: every stint drawn on one map (each its own hue),
+/// combined stats, and the ordered list of stints (tap one to open it as a ride).
 /// Open trips can be continued or finished here; finished trips can be reopened.
 class TripDetailScreen extends ConsumerStatefulWidget {
   const TripDetailScreen({super.key, required this.trip});
@@ -60,21 +60,21 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
   bool get _isOpen => _finishedAt == null;
 
   /// Shares the whole trip as one card: a synthesized combined [Ride] fed to the
-  /// existing layouts, with the legs' tracks concatenated and [legStarts]
-  /// marking the joins so each leg draws as its own colored polyline.
+  /// existing layouts, with the stints' tracks concatenated and [stintStarts]
+  /// marking the joins so each stint draws as its own colored polyline.
   Future<void> _shareTrip() async {
     if (_sharing) return;
-    final legTracks = ref.read(tripLegsProvider(widget.trip.id)).valueOrNull;
-    if (legTracks == null || legTracks.isEmpty) return;
+    final stintTracks = ref.read(tripStintsProvider(widget.trip.id)).valueOrNull;
+    if (stintTracks == null || stintTracks.isEmpty) return;
 
-    final stats = TripStats.fromLegs([for (final lt in legTracks) lt.leg]);
+    final stats = TripStats.fromStints([for (final lt in stintTracks) lt.stint]);
     final combined =
         stats.toCombinedRide(tripId: widget.trip.id, name: _name);
-    final points = [for (final lt in legTracks) ...lt.track];
-    final legStarts = <int>[];
+    final points = [for (final lt in stintTracks) ...lt.track];
+    final stintStarts = <int>[];
     var acc = 0;
-    for (final lt in legTracks) {
-      if (acc > 0) legStarts.add(acc);
+    for (final lt in stintTracks) {
+      if (acc > 0) stintStarts.add(acc);
       acc += lt.track.length;
     }
 
@@ -83,7 +83,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
       ride: combined,
       points: points,
       unit: ref.read(speedUnitProvider),
-      legStarts: legStarts,
+      stintStarts: stintStarts,
       subject: 'trip',
       onBusyChanged: (b) {
         if (mounted) setState(() => _sharing = b);
@@ -95,7 +95,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
     ref.invalidate(rideHistoryProvider);
     ref.invalidate(openTripsProvider);
     ref.invalidate(finishedTripsProvider);
-    ref.invalidate(tripLegsProvider(widget.trip.id));
+    ref.invalidate(tripStintsProvider(widget.trip.id));
   }
 
   Future<void> _finish() async {
@@ -124,8 +124,8 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
     }
   }
 
-  /// Renames the trip. A trip's name is independent of its legs' names, so this
-  /// leaves every leg untouched.
+  /// Renames the trip. A trip's name is independent of its stints' names, so this
+  /// leaves every stint untouched.
   Future<void> _renameTrip() async {
     final next = await showRenameDialog(
       context,
@@ -146,22 +146,22 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
     }
   }
 
-  /// Renames one leg (a [Ride]) — never the trip.
-  Future<void> _renameLeg(Ride leg, int index) async {
+  /// Renames one stint (a [Ride]) — never the trip.
+  Future<void> _renameStint(Ride stint, int index) async {
     final next = await showRenameDialog(
       context,
-      title: 'Rename leg ${index + 1}',
-      initial: leg.name,
-      hint: 'Leg name (e.g. Berangkat)',
+      title: 'Rename stint ${index + 1}',
+      initial: stint.name,
+      hint: 'Stint name (e.g. Berangkat)',
     );
     if (next == null || !mounted) return;
     setState(() => _busy = true);
-    await DatabaseService.instance.setRideName(leg.id, next);
+    await DatabaseService.instance.setRideName(stint.id, next);
     _invalidateHistory();
     if (mounted) setState(() => _busy = false);
   }
 
-  /// Resumes the trip: arms the next-leg continuation and drops the rider back
+  /// Resumes the trip: arms the next-stint continuation and drops the rider back
   /// on the Record tab.
   void _continue() {
     ref
@@ -175,9 +175,9 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
   Widget build(BuildContext context) {
     final cx = AppColors.of(context);
     final unit = ref.watch(speedUnitProvider);
-    final legsAsync = ref.watch(tripLegsProvider(widget.trip.id));
+    final stintsAsync = ref.watch(tripStintsProvider(widget.trip.id));
     final name = _name?.trim();
-    final canShare = legsAsync.valueOrNull?.isNotEmpty == true;
+    final canShare = stintsAsync.valueOrNull?.isNotEmpty == true;
 
     return Scaffold(
       backgroundColor: cx.canvas,
@@ -203,7 +203,7 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
             const DetailMenuItem(
               value: 'continue',
               icon: Icons.play_arrow,
-              label: 'Add the next leg',
+              label: 'Add the next stint',
             ),
             const DetailMenuItem(
               value: 'finish',
@@ -213,15 +213,15 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
           ] else
             // Was "Reopen trip" — a name for the state change rather than for
             // what the rider came to do. Reopening is never the goal; adding
-            // another leg is, and reopening is just what it takes.
+            // another stint is, and reopening is just what it takes.
             const DetailMenuItem(
               value: 'reopen',
               icon: Icons.lock_open,
-              label: 'Add the next leg',
+              label: 'Add the next stint',
             ),
         ],
       ),
-      body: legsAsync.when(
+      body: stintsAsync.when(
         loading: () =>
             Center(child: CircularProgressIndicator(color: cx.accentInk)),
         error: (e, _) => Center(
@@ -229,30 +229,30 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
               textAlign: TextAlign.center,
               style: TextStyle(color: cx.dangerInk)),
         ),
-        data: (legTracks) {
+        data: (stintTracks) {
           final stats =
-              TripStats.fromLegs([for (final lt in legTracks) lt.leg]);
+              TripStats.fromStints([for (final lt in stintTracks) lt.stint]);
           return Column(
             children: [
               if (_isOpen) _OpenBadge(cx: cx),
               SizedBox(
                 height: 300,
-                child: _TripMap(legTracks: legTracks),
+                child: _TripMap(stintTracks: stintTracks),
               ),
               Expanded(
                 child: SingleChildScrollView(
                   child: Column(
                     children: [
                       _TripSummaryPanel(stats: stats, unit: unit),
-                      _LegList(
-                        legTracks: legTracks,
+                      _StintList(
+                        stintTracks: stintTracks,
                         unit: unit,
-                        onOpenLeg: (leg) => Navigator.of(context).push(
+                        onOpenStint: (stint) => Navigator.of(context).push(
                           MaterialPageRoute(
-                            builder: (_) => RideDetailScreen(ride: leg),
+                            builder: (_) => RideDetailScreen(ride: stint),
                           ),
                         ),
-                        onRenameLeg: _renameLeg,
+                        onRenameStint: _renameStint,
                       ),
                       const SizedBox(height: 20),
                     ],
@@ -293,29 +293,29 @@ class _OpenBadge extends StatelessWidget {
   }
 }
 
-/// The combined route map: each leg its own colored polyline, a start dot, an
-/// end dot, and neutral turnaround dots at the joins between legs.
+/// The combined route map: each stint its own colored polyline, a start dot, an
+/// end dot, and neutral turnaround dots at the joins between stints.
 class _TripMap extends StatelessWidget {
-  const _TripMap({required this.legTracks});
+  const _TripMap({required this.stintTracks});
 
-  final List<LegTrack> legTracks;
+  final List<StintTrack> stintTracks;
 
   @override
   Widget build(BuildContext context) {
     final cx = AppColors.of(context);
 
-    // Per-leg polylines + the flattened point set for the camera fit.
+    // Per-stint polylines + the flattened point set for the camera fit.
     final polylines = <Polyline>[];
     final allPoints = <LatLng>[];
-    final legLatLngs = <List<LatLng>>[];
-    for (var i = 0; i < legTracks.length; i++) {
+    final stintLatLngs = <List<LatLng>>[];
+    for (var i = 0; i < stintTracks.length; i++) {
       final pts = [
-        for (final p in legTracks[i].track) LatLng(p.latitude, p.longitude)
+        for (final p in stintTracks[i].track) LatLng(p.latitude, p.longitude)
       ];
-      legLatLngs.add(pts);
+      stintLatLngs.add(pts);
       allPoints.addAll(pts);
       if (pts.length >= 2) {
-        polylines.add(Polyline(points: pts, strokeWidth: 5, color: _legColor(i)));
+        polylines.add(Polyline(points: pts, strokeWidth: 5, color: _stintColor(i)));
       }
     }
 
@@ -323,17 +323,17 @@ class _TripMap extends StatelessWidget {
       return const NoTrackNotice(subject: 'trip');
     }
 
-    // Endpoints: first point of the first non-empty leg, last of the last.
-    final firstLeg = legLatLngs.firstWhere((p) => p.isNotEmpty, orElse: () => const []);
-    final lastLeg = legLatLngs.lastWhere((p) => p.isNotEmpty, orElse: () => const []);
-    final start = firstLeg.isNotEmpty ? firstLeg.first : allPoints.first;
-    final end = lastLeg.isNotEmpty ? lastLeg.last : allPoints.last;
+    // Endpoints: first point of the first non-empty stint, last of the last.
+    final firstStint = stintLatLngs.firstWhere((p) => p.isNotEmpty, orElse: () => const []);
+    final lastStint = stintLatLngs.lastWhere((p) => p.isNotEmpty, orElse: () => const []);
+    final start = firstStint.isNotEmpty ? firstStint.first : allPoints.first;
+    final end = lastStint.isNotEmpty ? lastStint.last : allPoints.last;
 
-    // Turnaround dots: the end of every leg except the last non-empty one.
-    final lastNonEmpty = legLatLngs.lastIndexWhere((p) => p.isNotEmpty);
+    // Turnaround dots: the end of every stint except the last non-empty one.
+    final lastNonEmpty = stintLatLngs.lastIndexWhere((p) => p.isNotEmpty);
     final turnarounds = <LatLng>[
-      for (var i = 0; i < legLatLngs.length; i++)
-        if (i != lastNonEmpty && legLatLngs[i].isNotEmpty) legLatLngs[i].last,
+      for (var i = 0; i < stintLatLngs.length; i++)
+        if (i != lastNonEmpty && stintLatLngs[i].isNotEmpty) stintLatLngs[i].last,
     ];
 
     return FlutterMap(
@@ -404,7 +404,7 @@ class _TripSummaryPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cx = AppColors.of(context);
-    final legLabel = stats.legCount == 1 ? '1 leg' : '${stats.legCount} legs';
+    final stintLabel = stats.stintCount == 1 ? '1 stint' : '${stats.stintCount} stints';
     return Container(
       width: double.infinity,
       color: cx.canvas,
@@ -414,7 +414,7 @@ class _TripSummaryPanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '$legLabel · combined',
+            '$stintLabel · combined',
             style: TextStyle(color: cx.textDim, fontSize: 13),
           ),
           const SizedBox(height: 6),
@@ -465,7 +465,7 @@ class _TripSummaryPanel extends StatelessWidget {
           const SizedBox(height: 8),
           Divider(color: cx.border, height: 32),
           Text(
-            'LEGS',
+            'STINTS',
             style: TextStyle(
               color: cx.textTertiary,
               fontSize: 12,
@@ -479,20 +479,20 @@ class _TripSummaryPanel extends StatelessWidget {
   }
 }
 
-/// Ordered leg rows, each a small card colored to match its map polyline;
-/// tapping one opens that leg as a normal ride.
-class _LegList extends StatelessWidget {
-  const _LegList({
-    required this.legTracks,
+/// Ordered stint rows, each a small card colored to match its map polyline;
+/// tapping one opens that stint as a normal ride.
+class _StintList extends StatelessWidget {
+  const _StintList({
+    required this.stintTracks,
     required this.unit,
-    required this.onOpenLeg,
-    required this.onRenameLeg,
+    required this.onOpenStint,
+    required this.onRenameStint,
   });
 
-  final List<LegTrack> legTracks;
+  final List<StintTrack> stintTracks;
   final SpeedUnit unit;
-  final ValueChanged<Ride> onOpenLeg;
-  final void Function(Ride leg, int index) onRenameLeg;
+  final ValueChanged<Ride> onOpenStint;
+  final void Function(Ride stint, int index) onRenameStint;
 
   @override
   Widget build(BuildContext context) {
@@ -500,15 +500,15 @@ class _LegList extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       child: Column(
         children: [
-          for (var i = 0; i < legTracks.length; i++) ...[
-            _LegRow(
+          for (var i = 0; i < stintTracks.length; i++) ...[
+            _StintRow(
               index: i,
-              leg: legTracks[i].leg,
+              stint: stintTracks[i].stint,
               unit: unit,
-              onTap: () => onOpenLeg(legTracks[i].leg),
-              onRename: () => onRenameLeg(legTracks[i].leg, i),
+              onTap: () => onOpenStint(stintTracks[i].stint),
+              onRename: () => onRenameStint(stintTracks[i].stint, i),
             ),
-            if (i < legTracks.length - 1) const SizedBox(height: 10),
+            if (i < stintTracks.length - 1) const SizedBox(height: 10),
           ],
         ],
       ),
@@ -516,17 +516,17 @@ class _LegList extends StatelessWidget {
   }
 }
 
-class _LegRow extends StatelessWidget {
-  const _LegRow({
+class _StintRow extends StatelessWidget {
+  const _StintRow({
     required this.index,
-    required this.leg,
+    required this.stint,
     required this.unit,
     required this.onTap,
     required this.onRename,
   });
 
   final int index;
-  final Ride leg;
+  final Ride stint;
   final SpeedUnit unit;
   final VoidCallback onTap;
   final VoidCallback onRename;
@@ -534,14 +534,14 @@ class _LegRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cx = AppColors.of(context);
-    final name = leg.name?.trim();
+    final name = stint.name?.trim();
     return Material(
       color: cx.surface,
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
         onTap: onTap,
-        // Long-press renames this leg in place — the same action lives in the
-        // leg's own detail screen for discoverability.
+        // Long-press renames this stint in place — the same action lives in the
+        // stint's own detail screen for discoverability.
         onLongPress: onRename,
         borderRadius: BorderRadius.circular(14),
         child: Container(
@@ -556,7 +556,7 @@ class _LegRow extends StatelessWidget {
                 width: 12,
                 height: 12,
                 decoration: BoxDecoration(
-                  color: _legColor(index),
+                  color: _stintColor(index),
                   shape: BoxShape.circle,
                 ),
               ),
@@ -566,7 +566,7 @@ class _LegRow extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'LEG ${index + 1}',
+                      'STINT ${index + 1}',
                       style: TextStyle(
                         color: cx.textTertiary,
                         fontSize: 12,
@@ -576,7 +576,7 @@ class _LegRow extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      name?.isNotEmpty == true ? name! : 'Untitled leg',
+                      name?.isNotEmpty == true ? name! : 'Untitled stint',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -587,22 +587,22 @@ class _LegRow extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '${_fmtDuration(leg.durationSeconds)} · '
-                      '${unit.speed(leg.averageSpeedKmh).toStringAsFixed(0)} '
+                      '${_fmtDuration(stint.durationSeconds)} · '
+                      '${unit.speed(stint.averageSpeedKmh).toStringAsFixed(0)} '
                       '${unit.speedLabel} avg',
                       style: TextStyle(color: cx.textDim, fontSize: 12),
                     ),
-                    // Where this leg actually went. Collapses to nothing when
+                    // Where this stint actually went. Collapses to nothing when
                     // neither end geocoded (offline saves, old rides).
                     if (PlaceRouteLabel.label(
-                          leg.startPlace,
-                          leg.endPlace,
+                          stint.startPlace,
+                          stint.endPlace,
                         ) !=
                         null) ...[
                       const SizedBox(height: 4),
                       PlaceRouteLabel(
-                        startPlace: leg.startPlace,
-                        endPlace: leg.endPlace,
+                        startPlace: stint.startPlace,
+                        endPlace: stint.endPlace,
                         fontSize: 12,
                       ),
                     ],
@@ -613,7 +613,7 @@ class _LegRow extends StatelessWidget {
               RichText(
                 text: TextSpan(
                   text: unit
-                      .distanceMeters(leg.totalDistanceMeters)
+                      .distanceMeters(stint.totalDistanceMeters)
                       .toStringAsFixed(2),
                   style: TextStyle(
                     color: cx.accentInk,

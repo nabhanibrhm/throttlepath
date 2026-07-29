@@ -53,7 +53,7 @@ class ShareCard extends StatelessWidget {
     required this.points,
     required this.unit,
     this.layout = ShareLayout.split,
-    this.legStarts = const [],
+    this.stintStarts = const [],
   });
 
   final Ride ride;
@@ -61,11 +61,11 @@ class ShareCard extends StatelessWidget {
   final SpeedUnit unit;
   final ShareLayout layout;
 
-  /// Indices into [points] where each leg (after the first) begins — set when
-  /// this card renders a whole multi-leg trip so the route draws each leg as a
+  /// Indices into [points] where each stint (after the first) begins — set when
+  /// this card renders a whole multi-stint trip so the route draws each stint as a
   /// separate colored polyline instead of one line with false join connectors.
   /// Empty for a single ride.
-  final List<int> legStarts;
+  final List<int> stintStarts;
 
   /// Bundled brand mark — clean amber speedometer on transparent. Precached
   /// before capture (the render only waits a couple of frames).
@@ -294,7 +294,7 @@ class ShareCard extends StatelessWidget {
           points,
           colorBySpeed: colorBySpeed,
           maxSpeedKmh: ride.maxSpeedKmh,
-          legStarts: legStarts,
+          stintStarts: stintStarts,
         ),
       ),
     );
@@ -442,23 +442,23 @@ class _RoutePainter extends CustomPainter {
     this.points, {
     this.colorBySpeed = false,
     this.maxSpeedKmh = 0,
-    this.legStarts = const [],
+    this.stintStarts = const [],
   });
 
   final List<TrackPoint> points;
   final bool colorBySpeed;
   final double maxSpeedKmh;
 
-  /// Indices where each leg (after the first) begins; empty for a single ride.
-  final List<int> legStarts;
+  /// Indices where each stint (after the first) begins; empty for a single ride.
+  final List<int> stintStarts;
 
   static const _amber = Color(0xFFFFB22C);
   static const _red = Color(0xFFEF4444);
   static const _dim = Color(0xFFD8D8D8);
 
-  /// Per-leg route hues, cycled by leg index. Leg 1 is the brand amber so a
-  /// single-leg trip (and every plain ride) keeps the original look.
-  static const _legPalette = <Color>[
+  /// Per-stint route hues, cycled by stint index. Stint 1 is the brand amber so a
+  /// single-stint trip (and every plain ride) keeps the original look.
+  static const _stintPalette = <Color>[
     Color(0xFFFFB22C), // amber (brand)
     Color(0xFF29B6F6), // light blue
     Color(0xFF66BB6A), // green
@@ -519,17 +519,17 @@ class _RoutePainter extends CustomPainter {
 
     final mapped = [for (final o in proj) map(o)];
 
-    // One contiguous range per leg (single ride → one range). Segments never
-    // bridge a leg boundary, so joins draw no false straight connector.
-    final ranges = _legRanges(points.length);
+    // One contiguous range per stint (single ride → one range). Segments never
+    // bridge a stint boundary, so joins draw no false straight connector.
+    final ranges = _stintRanges(points.length);
 
     if (colorBySpeed) {
       _paintSpeedColored(canvas, mapped, ranges);
     } else {
-      _paintLegs(canvas, mapped, ranges);
+      _paintStints(canvas, mapped, ranges);
     }
 
-    // Turnaround dots at each join (end of every non-final leg), then the start
+    // Turnaround dots at each join (end of every non-final stint), then the start
     // (amber) and end (red) dots painted on top.
     for (var r = 0; r < ranges.length - 1; r++) {
       final end = ranges[r].$2 - 1;
@@ -539,12 +539,12 @@ class _RoutePainter extends CustomPainter {
     _dot(canvas, mapped.last, _red);
   }
 
-  /// Contiguous `[start, end)` index ranges, one per leg, from [legStarts]. With
+  /// Contiguous `[start, end)` index ranges, one per stint, from [stintStarts]. With
   /// no boundaries the whole track is a single range.
-  List<(int, int)> _legRanges(int n) {
+  List<(int, int)> _stintRanges(int n) {
     final bounds = <int>[
       0,
-      for (final b in legStarts)
+      for (final b in stintStarts)
         if (b > 0 && b < n) b,
       n,
     ]..sort();
@@ -555,11 +555,11 @@ class _RoutePainter extends CustomPainter {
     return out.isEmpty ? [(0, n)] : out;
   }
 
-  void _paintLegs(Canvas canvas, List<Offset> pts, List<(int, int)> ranges) {
+  void _paintStints(Canvas canvas, List<Offset> pts, List<(int, int)> ranges) {
     for (var r = 0; r < ranges.length; r++) {
       final (start, end) = ranges[r];
       if (end - start < 2) continue;
-      final color = _legPalette[r % _legPalette.length];
+      final color = _stintPalette[r % _stintPalette.length];
       final path = Path()..moveTo(pts[start].dx, pts[start].dy);
       for (var i = start + 1; i < end; i++) {
         path.lineTo(pts[i].dx, pts[i].dy);
@@ -620,7 +620,7 @@ class _RoutePainter extends CustomPainter {
       oldDelegate.points != points ||
       oldDelegate.colorBySpeed != colorBySpeed ||
       oldDelegate.maxSpeedKmh != maxSpeedKmh ||
-      !listEquals(oldDelegate.legStarts, legStarts);
+      !listEquals(oldDelegate.stintStarts, stintStarts);
 }
 
 String _fmtDuration(int seconds) {

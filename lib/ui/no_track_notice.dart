@@ -16,7 +16,7 @@ class NoTrackNotice extends StatelessWidget {
     this.detail,
   });
 
-  /// 'ride', 'leg' or 'trip' — used in the explanation.
+  /// 'ride', 'stint' or 'trip' — used in the explanation.
   final String subject;
 
   /// Optional extra line, e.g. the distance that was recorded anyway.

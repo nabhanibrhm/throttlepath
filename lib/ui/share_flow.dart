@@ -45,8 +45,8 @@ class _ShareRequest {
 /// underneath it the whole time.
 ///
 /// [ride] may be a real saved ride or a synthesized combined trip ride; when it is
-/// a trip, [legStarts] marks the leg boundaries in [points] so both the card and
-/// the GPX draw each leg separately. [onBusyChanged] toggles the caller's spinner
+/// a trip, [stintStarts] marks the stint boundaries in [points] so both the card and
+/// the GPX draw each stint separately. [onBusyChanged] toggles the caller's spinner
 /// around the render. [subject] tunes the wording ("ride" / "trip").
 Future<void> showShareFlow(
   BuildContext context, {
@@ -54,7 +54,7 @@ Future<void> showShareFlow(
   required List<TrackPoint> points,
   required SpeedUnit unit,
   required ValueChanged<bool> onBusyChanged,
-  List<int> legStarts = const [],
+  List<int> stintStarts = const [],
   String subject = 'ride',
 }) async {
   final cx = AppColors.of(context);
@@ -69,7 +69,7 @@ Future<void> showShareFlow(
       ride: ride,
       points: points,
       unit: unit,
-      legStarts: legStarts,
+      stintStarts: stintStarts,
       subject: subject,
     ),
   );
@@ -78,7 +78,7 @@ Future<void> showShareFlow(
   onBusyChanged(true);
   try {
     if (request.gpx) {
-      await GpxExport.share(ride: ride, points: points, legStarts: legStarts);
+      await GpxExport.share(ride: ride, points: points, stintStarts: stintStarts);
     } else {
       switch (request.action) {
         case _ShareAction.instagram:
@@ -88,7 +88,7 @@ Future<void> showShareFlow(
             points: points,
             unit: unit,
             layout: request.layout,
-            legStarts: legStarts,
+            stintStarts: stintStarts,
           );
         case _ShareAction.gallery:
           await RideShare.saveToGallery(
@@ -97,7 +97,7 @@ Future<void> showShareFlow(
             points: points,
             unit: unit,
             layout: request.layout,
-            legStarts: legStarts,
+            stintStarts: stintStarts,
           );
           if (context.mounted) _showMessage(context, 'Saved to your gallery.');
         case _ShareAction.more:
@@ -107,7 +107,7 @@ Future<void> showShareFlow(
             points: points,
             unit: unit,
             layout: request.layout,
-            legStarts: legStarts,
+            stintStarts: stintStarts,
           );
       }
     }
@@ -135,14 +135,14 @@ class _ShareComposer extends StatefulWidget {
     required this.ride,
     required this.points,
     required this.unit,
-    required this.legStarts,
+    required this.stintStarts,
     required this.subject,
   });
 
   final Ride ride;
   final List<TrackPoint> points;
   final SpeedUnit unit;
-  final List<int> legStarts;
+  final List<int> stintStarts;
   final String subject;
 
   @override
@@ -226,7 +226,7 @@ class _ShareComposerState extends State<_ShareComposer> {
                   ride: widget.ride,
                   points: widget.points,
                   unit: widget.unit,
-                  legStarts: widget.legStarts,
+                  stintStarts: widget.stintStarts,
                   layout: ShareLayout.values[i],
                 ),
               ),
@@ -321,14 +321,14 @@ class _Preview extends StatelessWidget {
     required this.ride,
     required this.points,
     required this.unit,
-    required this.legStarts,
+    required this.stintStarts,
     required this.layout,
   });
 
   final Ride ride;
   final List<TrackPoint> points;
   final SpeedUnit unit;
-  final List<int> legStarts;
+  final List<int> stintStarts;
   final ShareLayout layout;
 
   @override
@@ -354,7 +354,7 @@ class _Preview extends StatelessWidget {
                 points: points,
                 unit: unit,
                 layout: layout,
-                legStarts: legStarts,
+                stintStarts: stintStarts,
               ),
             ),
           ),

@@ -55,8 +55,8 @@ class TrackingUiState {
   final LiveTelemetry? lastFinished;
 
   /// When non-null, the next recording is a continuation of this open trip (its
-  /// next leg) — set from the History "Continue" affordance and consumed when
-  /// the leg is saved. [continuingTripName] is carried alongside for display.
+  /// next stint) — set from the History "Continue" affordance and consumed when
+  /// the stint is saved. [continuingTripName] is carried alongside for display.
   final int? continuingTripId;
   final String? continuingTripName;
   final String? error;
@@ -205,35 +205,35 @@ class TrackingController extends StateNotifier<TrackingUiState> {
   /// Standalone save — names the just-finished ride (already persisted), with no
   /// trip link, and returns to idle so the next ride starts fresh.
   Future<void> saveFinishedRide(String name) async {
-    await _persistLeg(name);
+    await _persistStint(name);
     _resetToIdle(clearContinuation: true);
   }
 
-  /// Saves the finished leg into its trip — creating a fresh open trip named
-  /// [tripName] if this is a first leg, or linking to the trip currently being
+  /// Saves the finished stint into its trip — creating a fresh open trip named
+  /// [tripName] if this is a first stint, or linking to the trip currently being
   /// continued — and leaves the trip OPEN so the rider can continue it.
   ///
-  /// [name] names the leg and [tripName] the trip: the two are independent, so
-  /// naming a leg never renames its trip (or vice versa).
+  /// [name] names the stint and [tripName] the trip: the two are independent, so
+  /// naming a stint never renames its trip (or vice versa).
   Future<void> saveAndContinueTrip(String name, {String? tripName}) async {
     final tripId = await _resolveTripId(tripName);
-    await _persistLeg(name, tripId: tripId);
+    await _persistStint(name, tripId: tripId);
     _resetToIdle(clearContinuation: true);
   }
 
-  /// Saves the finished leg into its trip (creating one named [tripName] if
-  /// needed) and then FINISHES that trip — it accepts no more legs until
+  /// Saves the finished stint into its trip (creating one named [tripName] if
+  /// needed) and then FINISHES that trip — it accepts no more stints until
   /// reopened.
-  Future<void> finishTripWithLeg(String name, {String? tripName}) async {
+  Future<void> finishTripWithStint(String name, {String? tripName}) async {
     final tripId = await _resolveTripId(tripName);
-    await _persistLeg(name, tripId: tripId);
+    await _persistStint(name, tripId: tripId);
     await DatabaseService.instance.finishTrip(tripId);
     _resetToIdle(clearContinuation: true);
   }
 
-  /// Marks the next recording as the next leg of [tripId]. Set from the History
+  /// Marks the next recording as the next stint of [tripId]. Set from the History
   /// "Continue" affordance before the rider starts recording; consumed when that
-  /// leg is saved. [tripName] is carried along for the record-screen banner.
+  /// stint is saved. [tripName] is carried along for the record-screen banner.
   void beginContinuation(int tripId, String? tripName) {
     state = state.copyWith(
       continuingTripId: tripId,
@@ -246,10 +246,10 @@ class TrackingController extends StateNotifier<TrackingUiState> {
   void cancelContinuation() =>
       state = state.copyWith(clearContinuation: true);
 
-  /// Persists the just-finished leg: names it (when a name was given), optionally
+  /// Persists the just-finished stint: names it (when a name was given), optionally
   /// links it to [tripId], then fires the best-effort geocode. Shared by the
   /// standalone-save and trip-save paths.
-  Future<void> _persistLeg(String name, {int? tripId}) async {
+  Future<void> _persistStint(String name, {int? tripId}) async {
     final t = state.lastFinished;
     if (t == null) return;
     final trimmed = name.trim();
@@ -262,10 +262,10 @@ class TrackingController extends StateNotifier<TrackingUiState> {
     _geocodeRide(t.rideId, state.route);
   }
 
-  /// Resolves the trip this leg belongs to: the trip currently being continued,
+  /// Resolves the trip this stint belongs to: the trip currently being continued,
   /// or a freshly-created open trip named [tripName]. A trip's name is asked for
-  /// separately from its legs' — when the rider leaves it blank the trip falls
-  /// back to a dated placeholder (never the leg's name), and stays renameable
+  /// separately from its stints' — when the rider leaves it blank the trip falls
+  /// back to a dated placeholder (never the stint's name), and stays renameable
   /// from trip detail.
   Future<int> _resolveTripId(String? tripName) async {
     final existing = state.continuingTripId;
@@ -311,7 +311,7 @@ class TrackingController extends StateNotifier<TrackingUiState> {
 
   /// Dismisses the summary without deleting — the ride stays in the DB (crash-safe
   /// default when the rider just backs out). If a continuation was pending, the
-  /// leg is still linked to its (open) trip so a lazy back-out doesn't orphan it.
+  /// stint is still linked to its (open) trip so a lazy back-out doesn't orphan it.
   ///
   /// [fallbackName] is the summary's auto-generated suggestion. Backing out used
   /// to leave the ride as "Untitled ride" forever; now the suggestion stands in,

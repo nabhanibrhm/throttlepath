@@ -37,31 +37,32 @@ class RideDisplaySwitcher extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        // 3 and 2 flex against 3 and 2 segments, so every segment in the row
+        // Flex matches each group's segment count, so every segment in the row
         // ends up the same width regardless of how long its label is.
+        //
+        // Both groups are built from `values` rather than a hand-written list:
+        // adding a backdrop used to mean remembering to add a segment here, and
+        // the enum is the only place that should have to know how many there are.
         Expanded(
-          flex: 3,
+          flex: RecordView.values.length,
           child: _SegmentedGroup<RecordView>(
             groupLabel: 'Backdrop',
             value: view,
             onChanged: onViewChanged,
-            segments: const [
-              _Segment(RecordView.map),
-              _Segment(RecordView.chart),
-              _Segment(RecordView.none),
+            segments: [
+              for (final v in RecordView.values) _Segment(v),
             ],
           ),
         ),
         const SizedBox(width: 10),
         Expanded(
-          flex: 2,
+          flex: SpeedGaugeStyle.values.length,
           child: _SegmentedGroup<SpeedGaugeStyle>(
             groupLabel: 'Live speed',
             value: gaugeStyle,
             onChanged: onGaugeStyleChanged,
-            segments: const [
-              _Segment(SpeedGaugeStyle.analog),
-              _Segment(SpeedGaugeStyle.digital),
+            segments: [
+              for (final v in SpeedGaugeStyle.values) _Segment(v),
             ],
           ),
         ),

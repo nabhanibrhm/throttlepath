@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:throttlepath/data/models/ride.dart';
 import 'package:throttlepath/data/trip_stats.dart';
 
-/// Builds a completed leg with denormalised stats (as `tracking_service` would
+/// Builds a completed stint with denormalised stats (as `tracking_service` would
 /// have written them). [start] fixes ordering; [durationS] is elapsed-minus-
 /// paused seconds, matching how a real ride's average is derived.
 Ride _leg({
@@ -31,11 +31,11 @@ Ride _leg({
 void main() {
   final t0 = DateTime(2026, 7, 25, 8);
 
-  group('TripStats.fromLegs', () {
+  group('TripStats.fromStints', () {
     test('empty trip is empty with zeroed totals', () {
-      final s = TripStats.fromLegs(const []);
+      final s = TripStats.fromStints(const []);
       expect(s.isEmpty, isTrue);
-      expect(s.legCount, 0);
+      expect(s.stintCount, 0);
       expect(s.totalDistanceMeters, 0);
       expect(s.durationSeconds, 0);
       expect(s.movingSeconds, 0);
@@ -45,8 +45,8 @@ void main() {
       expect(s.endTime, isNull);
     });
 
-    test('sums distance, duration and moving time across legs', () {
-      final s = TripStats.fromLegs([
+    test('sums distance, duration and moving time across stints', () {
+      final s = TripStats.fromStints([
         _leg(start: t0, distanceM: 10000, durationS: 1200, movingS: 1000),
         _leg(
           start: t0.add(const Duration(hours: 4)),
@@ -55,15 +55,15 @@ void main() {
           movingS: 550,
         ),
       ]);
-      expect(s.legCount, 2);
+      expect(s.stintCount, 2);
       expect(s.totalDistanceMeters, 15000);
       expect(s.durationSeconds, 1800);
       expect(s.movingSeconds, 1550);
     });
 
-    test('the 4-hour gap between legs never enters the total time', () {
-      // Two 10-minute legs 4 hours apart: trip time must be 20 min, not 4h20.
-      final s = TripStats.fromLegs([
+    test('the 4-hour gap between stints never enters the total time', () {
+      // Two 10-minute stints 4 hours apart: trip time must be 20 min, not 4h20.
+      final s = TripStats.fromStints([
         _leg(
           start: t0,
           end: t0.add(const Duration(minutes: 10)),
@@ -81,9 +81,9 @@ void main() {
     });
 
     test('average is combined distance ÷ combined duration, not mean of avgs', () {
-      // Leg A: 3600 m in 3600 s -> 3.6 km/h. Leg B: 36000 m in 3600 s -> 36 km/h.
-      // Mean of per-leg avgs would be 19.8; correct combined = 39600m/7200s*3.6.
-      final s = TripStats.fromLegs([
+      // Stint A: 3600 m in 3600 s -> 3.6 km/h. Stint B: 36000 m in 3600 s -> 36 km/h.
+      // Mean of per-stint avgs would be 19.8; correct combined = 39600m/7200s*3.6.
+      final s = TripStats.fromStints([
         _leg(start: t0, distanceM: 3600, durationS: 3600, avgKmh: 3.6),
         _leg(
           start: t0.add(const Duration(hours: 2)),
@@ -97,8 +97,8 @@ void main() {
       expect(s.averageSpeedKmh, closeTo((39600 / 7200) * 3.6, 1e-9));
     });
 
-    test('max speed is the max of per-leg maxima', () {
-      final s = TripStats.fromLegs([
+    test('max speed is the max of per-stint maxima', () {
+      final s = TripStats.fromStints([
         _leg(start: t0, maxKmh: 88),
         _leg(start: t0.add(const Duration(hours: 1)), maxKmh: 142),
         _leg(start: t0.add(const Duration(hours: 2)), maxKmh: 97),
@@ -106,7 +106,7 @@ void main() {
       expect(s.maxSpeedKmh, 142);
     });
 
-    test('legs are ordered by start time regardless of input order', () {
+    test('stints are ordered by start time regardless of input order', () {
       final first = _leg(start: t0, startPlace: 'Bandung');
       final middle = _leg(start: t0.add(const Duration(hours: 3)));
       final last = _leg(
@@ -114,15 +114,15 @@ void main() {
         end: t0.add(const Duration(hours: 6, minutes: 30)),
         endPlace: 'Lembang',
       );
-      final s = TripStats.fromLegs([last, first, middle]);
-      expect(s.legs.map((r) => r.startTime).toList(),
+      final s = TripStats.fromStints([last, first, middle]);
+      expect(s.stints.map((r) => r.startTime).toList(),
           [first.startTime, middle.startTime, last.startTime]);
       expect(s.startTime, first.startTime);
       expect(s.endTime, last.endTime);
     });
 
-    test('endTime is null when the last leg is still recording', () {
-      final s = TripStats.fromLegs([
+    test('endTime is null when the last stint is still recording', () {
+      final s = TripStats.fromStints([
         _leg(
           start: t0,
           end: t0.add(const Duration(minutes: 10)),
@@ -134,15 +134,15 @@ void main() {
       expect(s.startTime, t0);
     });
 
-    test('legs list is unmodifiable', () {
-      final s = TripStats.fromLegs([_leg(start: t0)]);
-      expect(() => s.legs.add(_leg(start: t0)), throwsUnsupportedError);
+    test('stints list is unmodifiable', () {
+      final s = TripStats.fromStints([_leg(start: t0)]);
+      expect(() => s.stints.add(_leg(start: t0)), throwsUnsupportedError);
     });
   });
 
   group('TripStats.toCombinedRide', () {
     test('carries summed stats, span, endpoints and trip identity', () {
-      final s = TripStats.fromLegs([
+      final s = TripStats.fromStints([
         _leg(
           start: t0,
           end: t0.add(const Duration(minutes: 10)),
@@ -173,8 +173,8 @@ void main() {
       expect(combined.averageSpeedKmh, closeTo((7200 / 1200) * 3.6, 1e-9));
       expect(combined.startTime, t0);
       expect(combined.endTime, t0.add(const Duration(hours: 4, minutes: 10)));
-      expect(combined.startPlace, 'Bandung'); // first leg's origin
-      expect(combined.endPlace, 'Lembang'); // last leg's destination
+      expect(combined.startPlace, 'Bandung'); // first stint's origin
+      expect(combined.endPlace, 'Lembang'); // last stint's destination
       expect(combined.gpsSource, 'trip');
     });
   });

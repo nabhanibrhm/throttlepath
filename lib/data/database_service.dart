@@ -55,8 +55,8 @@ class DatabaseService {
     return isar.rides.where().sortByStartTimeDesc().findAll();
   }
 
-  /// Standalone rides only (not a leg of any trip), newest first — the flat
-  /// entries in History. Trip legs are shown under their trip instead.
+  /// Standalone rides only (not a stint of any trip), newest first — the flat
+  /// entries in History. Trip stints are shown under their trip instead.
   Future<List<Ride>> getStandaloneRides() {
     return isar.rides
         .filter()
@@ -67,7 +67,7 @@ class DatabaseService {
 
   Future<Ride?> getRideById(int id) => isar.rides.get(id);
 
-  /// The most recently *finished* ride, standalone or trip leg — the "last ride"
+  /// The most recently *finished* ride, standalone or trip stint — the "last ride"
   /// line the Record screen shows while idle. Skips rides with no [Ride.endTime]
   /// (a recording interrupted by a crash), which would otherwise surface as a
   /// zero-distance ghost. Null when the rider has no completed rides yet.
@@ -126,6 +126,8 @@ class DatabaseService {
     String? routeKey,
     List<double>? routeBlob,
     double? smoothness,
+    double? leanP95Degrees,
+    double? leanPeakDegrees,
   }) {
     return isar.writeTxn(() async {
       final ride = await isar.rides.get(rideId);
@@ -133,6 +135,8 @@ class DatabaseService {
       ride.routeKey = routeKey;
       ride.routeBlob = routeBlob;
       ride.smoothness = smoothness;
+      ride.leanP95Degrees = leanP95Degrees;
+      ride.leanPeakDegrees = leanPeakDegrees;
       await isar.rides.put(ride);
     });
   }
@@ -149,7 +153,9 @@ class DatabaseService {
             .or()
             .routeBlobIsNull()
             .or()
-            .smoothnessIsNull())
+            .smoothnessIsNull()
+            .or()
+            .leanP95DegreesIsNull())
         .sortByStartTimeDesc()
         .findAll();
   }
@@ -198,7 +204,7 @@ class DatabaseService {
   /// Finished rides that started at or after [from], newest first.
   ///
   /// Uses the `startTime` index directly (a where-clause, not a filter), so a
-  /// four-week window stays cheap however long the history gets. Trip legs are
+  /// four-week window stays cheap however long the history gets. Trip stints are
   /// included — a week's distance is a week's distance regardless of how the ride
   /// was filed.
   Future<List<Ride>> getRidesStartedSince(DateTime from) {
@@ -290,8 +296,8 @@ class DatabaseService {
 
   Future<Trip?> getTripById(int id) => isar.trips.get(id);
 
-  /// Renames a trip. A trip's name is its own — independent of its legs' names —
-  /// so this never touches the legs. No-op if the trip was deleted.
+  /// Renames a trip. A trip's name is its own — independent of its stints' names —
+  /// so this never touches the stints. No-op if the trip was deleted.
   Future<void> setTripName(int tripId, String name) {
     return isar.writeTxn(() async {
       final trip = await isar.trips.get(tripId);
@@ -326,8 +332,8 @@ class DatabaseService {
         .findAll();
   }
 
-  /// A trip's legs (rides), ordered oldest-first by start time.
-  Future<List<Ride>> getLegsForTrip(int tripId) {
+  /// A trip's stints (rides), ordered oldest-first by start time.
+  Future<List<Ride>> getStintsForTrip(int tripId) {
     return isar.rides
         .filter()
         .tripIdEqualTo(tripId)
@@ -335,7 +341,7 @@ class DatabaseService {
         .findAll();
   }
 
-  /// Links (or unlinks, with null) a ride to a trip as one of its legs. No-op if
+  /// Links (or unlinks, with null) a ride to a trip as one of its stints. No-op if
   /// the ride was deleted before this ran.
   Future<void> setRideTrip(int rideId, int? tripId) {
     return isar.writeTxn(() async {
@@ -346,7 +352,7 @@ class DatabaseService {
     });
   }
 
-  /// Closes a trip (stamps [Trip.finishedAt]); it no longer accepts new legs
+  /// Closes a trip (stamps [Trip.finishedAt]); it no longer accepts new stints
   /// until reopened. No-op if the trip was deleted.
   Future<void> finishTrip(int tripId, {DateTime? finishedAt}) {
     return isar.writeTxn(() async {
@@ -357,7 +363,7 @@ class DatabaseService {
     });
   }
 
-  /// Reopens a finished trip (clears [Trip.finishedAt]) so more legs can be
+  /// Reopens a finished trip (clears [Trip.finishedAt]) so more stints can be
   /// added. No-op if the trip was deleted.
   Future<void> reopenTrip(int tripId) {
     return isar.writeTxn(() async {

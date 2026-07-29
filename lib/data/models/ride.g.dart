@@ -42,48 +42,58 @@ const RideSchema = CollectionSchema(
       name: r'gpsSource',
       type: IsarType.string,
     ),
-    r'maxSpeedKmh': PropertySchema(
+    r'leanP95Degrees': PropertySchema(
       id: 5,
+      name: r'leanP95Degrees',
+      type: IsarType.double,
+    ),
+    r'leanPeakDegrees': PropertySchema(
+      id: 6,
+      name: r'leanPeakDegrees',
+      type: IsarType.double,
+    ),
+    r'maxSpeedKmh': PropertySchema(
+      id: 7,
       name: r'maxSpeedKmh',
       type: IsarType.double,
     ),
     r'movingSeconds': PropertySchema(
-      id: 6,
+      id: 8,
       name: r'movingSeconds',
       type: IsarType.long,
     ),
-    r'name': PropertySchema(id: 7, name: r'name', type: IsarType.string),
+    r'name': PropertySchema(id: 9, name: r'name', type: IsarType.string),
     r'routeBlob': PropertySchema(
-      id: 8,
+      id: 10,
       name: r'routeBlob',
       type: IsarType.doubleList,
     ),
     r'routeKey': PropertySchema(
-      id: 9,
+      id: 11,
       name: r'routeKey',
       type: IsarType.string,
     ),
     r'smoothness': PropertySchema(
-      id: 10,
+      id: 12,
       name: r'smoothness',
       type: IsarType.double,
     ),
     r'startPlace': PropertySchema(
-      id: 11,
+      id: 13,
       name: r'startPlace',
       type: IsarType.string,
     ),
     r'startTime': PropertySchema(
-      id: 12,
+      id: 14,
       name: r'startTime',
       type: IsarType.dateTime,
     ),
     r'totalDistanceMeters': PropertySchema(
-      id: 13,
+      id: 15,
       name: r'totalDistanceMeters',
       type: IsarType.double,
     ),
-    r'tripId': PropertySchema(id: 14, name: r'tripId', type: IsarType.long),
+    r'tripId': PropertySchema(id: 16, name: r'tripId', type: IsarType.long),
   },
 
   estimateSize: _rideEstimateSize,
@@ -197,16 +207,18 @@ void _rideSerialize(
   writer.writeString(offsets[2], object.endPlace);
   writer.writeDateTime(offsets[3], object.endTime);
   writer.writeString(offsets[4], object.gpsSource);
-  writer.writeDouble(offsets[5], object.maxSpeedKmh);
-  writer.writeLong(offsets[6], object.movingSeconds);
-  writer.writeString(offsets[7], object.name);
-  writer.writeDoubleList(offsets[8], object.routeBlob);
-  writer.writeString(offsets[9], object.routeKey);
-  writer.writeDouble(offsets[10], object.smoothness);
-  writer.writeString(offsets[11], object.startPlace);
-  writer.writeDateTime(offsets[12], object.startTime);
-  writer.writeDouble(offsets[13], object.totalDistanceMeters);
-  writer.writeLong(offsets[14], object.tripId);
+  writer.writeDouble(offsets[5], object.leanP95Degrees);
+  writer.writeDouble(offsets[6], object.leanPeakDegrees);
+  writer.writeDouble(offsets[7], object.maxSpeedKmh);
+  writer.writeLong(offsets[8], object.movingSeconds);
+  writer.writeString(offsets[9], object.name);
+  writer.writeDoubleList(offsets[10], object.routeBlob);
+  writer.writeString(offsets[11], object.routeKey);
+  writer.writeDouble(offsets[12], object.smoothness);
+  writer.writeString(offsets[13], object.startPlace);
+  writer.writeDateTime(offsets[14], object.startTime);
+  writer.writeDouble(offsets[15], object.totalDistanceMeters);
+  writer.writeLong(offsets[16], object.tripId);
 }
 
 Ride _rideDeserialize(
@@ -222,16 +234,18 @@ Ride _rideDeserialize(
   object.endTime = reader.readDateTimeOrNull(offsets[3]);
   object.gpsSource = reader.readStringOrNull(offsets[4]);
   object.id = id;
-  object.maxSpeedKmh = reader.readDouble(offsets[5]);
-  object.movingSeconds = reader.readLong(offsets[6]);
-  object.name = reader.readStringOrNull(offsets[7]);
-  object.routeBlob = reader.readDoubleList(offsets[8]);
-  object.routeKey = reader.readStringOrNull(offsets[9]);
-  object.smoothness = reader.readDoubleOrNull(offsets[10]);
-  object.startPlace = reader.readStringOrNull(offsets[11]);
-  object.startTime = reader.readDateTime(offsets[12]);
-  object.totalDistanceMeters = reader.readDouble(offsets[13]);
-  object.tripId = reader.readLongOrNull(offsets[14]);
+  object.leanP95Degrees = reader.readDoubleOrNull(offsets[5]);
+  object.leanPeakDegrees = reader.readDoubleOrNull(offsets[6]);
+  object.maxSpeedKmh = reader.readDouble(offsets[7]);
+  object.movingSeconds = reader.readLong(offsets[8]);
+  object.name = reader.readStringOrNull(offsets[9]);
+  object.routeBlob = reader.readDoubleList(offsets[10]);
+  object.routeKey = reader.readStringOrNull(offsets[11]);
+  object.smoothness = reader.readDoubleOrNull(offsets[12]);
+  object.startPlace = reader.readStringOrNull(offsets[13]);
+  object.startTime = reader.readDateTime(offsets[14]);
+  object.totalDistanceMeters = reader.readDouble(offsets[15]);
+  object.tripId = reader.readLongOrNull(offsets[16]);
   return object;
 }
 
@@ -253,24 +267,28 @@ P _rideDeserializeProp<P>(
     case 4:
       return (reader.readStringOrNull(offset)) as P;
     case 5:
-      return (reader.readDouble(offset)) as P;
+      return (reader.readDoubleOrNull(offset)) as P;
     case 6:
-      return (reader.readLong(offset)) as P;
+      return (reader.readDoubleOrNull(offset)) as P;
     case 7:
-      return (reader.readStringOrNull(offset)) as P;
+      return (reader.readDouble(offset)) as P;
     case 8:
-      return (reader.readDoubleList(offset)) as P;
+      return (reader.readLong(offset)) as P;
     case 9:
       return (reader.readStringOrNull(offset)) as P;
     case 10:
-      return (reader.readDoubleOrNull(offset)) as P;
+      return (reader.readDoubleList(offset)) as P;
     case 11:
       return (reader.readStringOrNull(offset)) as P;
     case 12:
-      return (reader.readDateTime(offset)) as P;
+      return (reader.readDoubleOrNull(offset)) as P;
     case 13:
-      return (reader.readDouble(offset)) as P;
+      return (reader.readStringOrNull(offset)) as P;
     case 14:
+      return (reader.readDateTime(offset)) as P;
+    case 15:
+      return (reader.readDouble(offset)) as P;
+    case 16:
       return (reader.readLongOrNull(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
@@ -1270,6 +1288,186 @@ extension RideQueryFilter on QueryBuilder<Ride, Ride, QFilterCondition> {
           includeLower: includeLower,
           upper: upper,
           includeUpper: includeUpper,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> leanP95DegreesIsNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        const FilterCondition.isNull(property: r'leanP95Degrees'),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> leanP95DegreesIsNotNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        const FilterCondition.isNotNull(property: r'leanP95Degrees'),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> leanP95DegreesEqualTo(
+    double? value, {
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.equalTo(
+          property: r'leanP95Degrees',
+          value: value,
+
+          epsilon: epsilon,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> leanP95DegreesGreaterThan(
+    double? value, {
+    bool include = false,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.greaterThan(
+          include: include,
+          property: r'leanP95Degrees',
+          value: value,
+
+          epsilon: epsilon,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> leanP95DegreesLessThan(
+    double? value, {
+    bool include = false,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.lessThan(
+          include: include,
+          property: r'leanP95Degrees',
+          value: value,
+
+          epsilon: epsilon,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> leanP95DegreesBetween(
+    double? lower,
+    double? upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.between(
+          property: r'leanP95Degrees',
+          lower: lower,
+          includeLower: includeLower,
+          upper: upper,
+          includeUpper: includeUpper,
+
+          epsilon: epsilon,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> leanPeakDegreesIsNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        const FilterCondition.isNull(property: r'leanPeakDegrees'),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> leanPeakDegreesIsNotNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        const FilterCondition.isNotNull(property: r'leanPeakDegrees'),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> leanPeakDegreesEqualTo(
+    double? value, {
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.equalTo(
+          property: r'leanPeakDegrees',
+          value: value,
+
+          epsilon: epsilon,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> leanPeakDegreesGreaterThan(
+    double? value, {
+    bool include = false,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.greaterThan(
+          include: include,
+          property: r'leanPeakDegrees',
+          value: value,
+
+          epsilon: epsilon,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> leanPeakDegreesLessThan(
+    double? value, {
+    bool include = false,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.lessThan(
+          include: include,
+          property: r'leanPeakDegrees',
+          value: value,
+
+          epsilon: epsilon,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> leanPeakDegreesBetween(
+    double? lower,
+    double? upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.between(
+          property: r'leanPeakDegrees',
+          lower: lower,
+          includeLower: includeLower,
+          upper: upper,
+          includeUpper: includeUpper,
+
+          epsilon: epsilon,
         ),
       );
     });
@@ -2402,6 +2600,30 @@ extension RideQuerySortBy on QueryBuilder<Ride, Ride, QSortBy> {
     });
   }
 
+  QueryBuilder<Ride, Ride, QAfterSortBy> sortByLeanP95Degrees() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'leanP95Degrees', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterSortBy> sortByLeanP95DegreesDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'leanP95Degrees', Sort.desc);
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterSortBy> sortByLeanPeakDegrees() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'leanPeakDegrees', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterSortBy> sortByLeanPeakDegreesDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'leanPeakDegrees', Sort.desc);
+    });
+  }
+
   QueryBuilder<Ride, Ride, QAfterSortBy> sortByMaxSpeedKmh() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'maxSpeedKmh', Sort.asc);
@@ -2584,6 +2806,30 @@ extension RideQuerySortThenBy on QueryBuilder<Ride, Ride, QSortThenBy> {
     });
   }
 
+  QueryBuilder<Ride, Ride, QAfterSortBy> thenByLeanP95Degrees() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'leanP95Degrees', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterSortBy> thenByLeanP95DegreesDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'leanP95Degrees', Sort.desc);
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterSortBy> thenByLeanPeakDegrees() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'leanPeakDegrees', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterSortBy> thenByLeanPeakDegreesDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'leanPeakDegrees', Sort.desc);
+    });
+  }
+
   QueryBuilder<Ride, Ride, QAfterSortBy> thenByMaxSpeedKmh() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'maxSpeedKmh', Sort.asc);
@@ -2728,6 +2974,18 @@ extension RideQueryWhereDistinct on QueryBuilder<Ride, Ride, QDistinct> {
     });
   }
 
+  QueryBuilder<Ride, Ride, QDistinct> distinctByLeanP95Degrees() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'leanP95Degrees');
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QDistinct> distinctByLeanPeakDegrees() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'leanPeakDegrees');
+    });
+  }
+
   QueryBuilder<Ride, Ride, QDistinct> distinctByMaxSpeedKmh() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(r'maxSpeedKmh');
@@ -2829,6 +3087,18 @@ extension RideQueryProperty on QueryBuilder<Ride, Ride, QQueryProperty> {
   QueryBuilder<Ride, String?, QQueryOperations> gpsSourceProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'gpsSource');
+    });
+  }
+
+  QueryBuilder<Ride, double?, QQueryOperations> leanP95DegreesProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'leanP95Degrees');
+    });
+  }
+
+  QueryBuilder<Ride, double?, QQueryOperations> leanPeakDegreesProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'leanPeakDegrees');
     });
   }
 

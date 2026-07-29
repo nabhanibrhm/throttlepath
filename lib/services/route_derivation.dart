@@ -1,3 +1,4 @@
+import '../core/lean.dart';
 import '../core/route_blob.dart';
 import '../core/route_key.dart';
 import '../core/smoothness.dart';
@@ -5,8 +6,8 @@ import '../data/database_service.dart';
 import '../data/models/ride.dart';
 import '../data/models/track_point.dart';
 
-/// Derives a ride's `routeKey` + `routeBlob` + `smoothness` from its track, and
-/// backfills the rides that predate those fields.
+/// Derives a ride's `routeKey` + `routeBlob` + `smoothness` + lean figures from
+/// its track, and backfills the rides that predate those fields.
 ///
 /// All three live here rather than on the engine so the backfill doesn't have to
 /// import `flutter_background_service`, and so the actual derivation stays a pure
@@ -28,25 +29,68 @@ double? deriveSmoothness(List<TrackPoint> points) =>
       for (final p in points) (time: p.timestamp, speedMps: p.speedMps),
     ]).score;
 
+/// The cornering figures worth comparing across rides, or nulls when the track is
+/// too sparse or too slow to estimate from (see `kMinLeanSamples`).
+///
+/// Rides recorded before `TrackPoint.headingDegrees` existed fall back to
+/// position-bearing automatically — `analyseLean` picks the source the data
+/// supports, so the backfill needs no special case for them.
+({double? p95, double? peak}) deriveLean(List<TrackPoint> points) {
+  final a = analyseLean([
+    for (final p in points)
+      (
+        time: p.timestamp,
+        speedMps: p.speedMps,
+        headingDegrees: p.headingDegrees,
+        latitude: p.latitude,
+        longitude: p.longitude,
+      ),
+  ]);
+  return (p95: a.p95Degrees, peak: a.peakDegrees);
+}
+
 /// The derived fields for a ride with [points] as its track.
 ///
 /// Returns a null key for a track too short to have a shape or a ride too short
 /// to have a route — a degenerate key would let a driveway wiggle compete for a
 /// real route's records. [smoothness] is independent of that floor: it is a claim
 /// about *how* you rode, not *where*, so a short but real ride can still score.
-({String? key, List<double>? blob, double? smoothness}) deriveRoute(
+({
+  String? key,
+  List<double>? blob,
+  double? smoothness,
+  double? leanP95,
+  double? leanPeak,
+}) deriveRoute(
   Ride ride,
   List<TrackPoint> points,
 ) {
-  if (points.length < 2) return (key: null, blob: null, smoothness: null);
+  if (points.length < 2) {
+    return (
+      key: null,
+      blob: null,
+      smoothness: null,
+      leanP95: null,
+      leanPeak: null
+    );
+  }
   final first = points.first;
   final last = points.last;
   final blob = encodeRouteBlob([
     for (final p in points) (lat: p.latitude, lon: p.longitude),
   ]);
   final smoothness = deriveSmoothness(points);
+  // Lean, like smoothness, is a claim about *how* you rode rather than *where*,
+  // so it is not gated behind the route-distance floor below.
+  final lean = deriveLean(points);
   if (ride.totalDistanceMeters < kRouteMinDistanceMeters) {
-    return (key: null, blob: blob, smoothness: smoothness);
+    return (
+      key: null,
+      blob: blob,
+      smoothness: smoothness,
+      leanP95: lean.p95,
+      leanPeak: lean.peak,
+    );
   }
   return (
     key: buildRouteKey(
@@ -58,6 +102,8 @@ double? deriveSmoothness(List<TrackPoint> points) =>
     ),
     blob: blob,
     smoothness: smoothness,
+    leanP95: lean.p95,
+    leanPeak: lean.peak,
   );
 }
 
@@ -68,7 +114,9 @@ Future<void> stampDerivedRoute(DatabaseService db, Ride ride) async {
   ride
     ..routeKey = derived.key
     ..routeBlob = derived.blob
-    ..smoothness = derived.smoothness;
+    ..smoothness = derived.smoothness
+    ..leanP95Degrees = derived.leanP95
+    ..leanPeakDegrees = derived.leanPeak;
 }
 
 /// Fills in `routeKey` / `routeBlob` / `smoothness` for finished rides recorded
@@ -113,7 +161,8 @@ class RouteBackfill {
         // A ride with no usable track derives to all-null — nothing to write.
         if (derived.key == null &&
             derived.blob == null &&
-            derived.smoothness == null) {
+            derived.smoothness == null &&
+            derived.leanP95 == null) {
           continue;
         }
         await db.setRideDerived(
@@ -121,6 +170,8 @@ class RouteBackfill {
           routeKey: derived.key,
           routeBlob: derived.blob,
           smoothness: derived.smoothness,
+          leanP95Degrees: derived.leanP95,
+          leanPeakDegrees: derived.leanPeak,
         );
         updated++;
       }

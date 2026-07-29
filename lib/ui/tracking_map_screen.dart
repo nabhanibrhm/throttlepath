@@ -9,6 +9,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+import '../core/lean.dart' show kMinLeanSpeedKmh;
 import '../core/record_view.dart';
 import '../core/speed_gauge_style.dart';
 import '../core/units.dart';
@@ -22,6 +23,7 @@ import '../services/permission_service.dart';
 import '../services/tracking_service.dart' show LiveTelemetry;
 import '../theme/app_theme.dart';
 import 'analog_speed_gauge.dart';
+import 'lean_gauge.dart';
 import 'live_speed_announcer.dart';
 import 'ride_display_switcher.dart';
 import 'ride_summary_screen.dart';
@@ -316,6 +318,13 @@ class _TrackingMapScreenState extends ConsumerState<TrackingMapScreen> {
               child: _ChartBackdrop(
                 state: state,
                 unit: unit,
+                bottomInset: _sheetHeight,
+              ),
+            )
+          else if (view == RecordView.lean)
+            Positioned.fill(
+              child: _LeanBackdrop(
+                state: state,
                 bottomInset: _sheetHeight,
               ),
             )
@@ -685,6 +694,98 @@ class _LocateButton extends StatelessWidget {
                             strokeWidth: 2.4, color: cx.accentInk),
                       )
                     : Icon(Icons.my_location, color: cx.accentInk),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Backdrop shown when the view is [RecordView.lean]: the live cornering estimate
+/// on the same dial the analysis tab uses for a finished ride.
+///
+/// Draws no tiles and no blur, so like the other non-map backdrops the GPU stays
+/// idle while recording continues.
+///
+/// **Honest about what it is.** The value lags — heading is differenced over a
+/// three-second baseline, so a corner is half over before the needle agrees — and
+/// the estimate reads low by construction. A rider cannot safely watch a phone
+/// mid-corner anyway; this is for the pillion, and for glancing at a stop. Nothing
+/// in the app depends on it, and it is never what gets saved: the ride's stored
+/// figures are recomputed from the track afterwards.
+///
+/// Below [kMinLeanSpeedKmh] there is no honest number, so it says so rather than
+/// parking the needle at zero as though it had measured zero.
+class _LeanBackdrop extends StatelessWidget {
+  const _LeanBackdrop({required this.state, required this.bottomInset});
+
+  final TrackingUiState state;
+
+  /// Measured height of the telemetry sheet covering the bottom of the stack.
+  final double bottomInset;
+
+  @override
+  Widget build(BuildContext context) {
+    final cx = AppColors.of(context);
+    final lean = state.telemetry?.leanDegrees;
+    final recording = state.phase == 'recording';
+    final speed = state.telemetry?.speedKmh ?? 0;
+
+    final String note;
+    if (!recording) {
+      note = 'Start recording to see cornering lean.';
+    } else if (lean == null && speed < kMinLeanSpeedKmh) {
+      note = 'Below ${kMinLeanSpeedKmh.round()} km/h — nothing to estimate yet.';
+    } else {
+      note = 'Estimated from GPS turn rate. Lags a corner, and reads low.';
+    }
+
+    return Container(
+      color: cx.canvas,
+      // The sheet already covers this band and applies its own SafeArea.
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: EdgeInsets.only(bottom: bottomInset),
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 28),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  LeanGauge(
+                    value: lean ?? 0,
+                    caption: 'LIVE LEAN',
+                    live: true,
+                    dimmed: lean == null,
+                    maxWidth: 240,
+                  ),
+                  const SizedBox(height: 18),
+                  // Which way, in words — the dial reads magnitude only, and a
+                  // signed numeral would leave the rider decoding a minus sign.
+                  if (lean != null)
+                    Text(
+                      lean < 0 ? 'LEANING LEFT' : 'LEANING RIGHT',
+                      style: TextStyle(
+                        color: cx.accentInk,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.0,
+                      ),
+                    ),
+                  const SizedBox(height: 10),
+                  Text(
+                    note,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: cx.textTertiary,
+                      fontSize: 12,
+                      height: 1.45,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -1629,7 +1730,7 @@ class _OutlinePill extends StatelessWidget {
 
 /// Filled status chip (PAUSED / GPS SIGNAL LOST). Deliberately louder than
 /// [_OutlinePill]: the paused screen used to differ from the recording one by a
-/// single small outlined badge, which is how riders finished a leg believing it
+/// single small outlined badge, which is how riders finished a stint believing it
 /// had been captured (F12).
 class _FilledPill extends StatelessWidget {
   const _FilledPill({

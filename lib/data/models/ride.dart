@@ -56,8 +56,8 @@ class Ride {
   /// (e.g. "Lembang"). Null under the same conditions as [startPlace].
   String? endPlace;
 
-  /// Links this ride to a [Trip] as one of its legs, by [Trip.id]. Null for a
-  /// standalone ride (the default). Indexed so a trip's legs can be fetched
+  /// Links this ride to a [Trip] as one of its stints, by [Trip.id]. Null for a
+  /// standalone ride (the default). Indexed so a trip's stints can be fetched
   /// cheaply by trip id. Additive — old rides read as null.
   @Index()
   int? tripId;
@@ -91,4 +91,22 @@ class Ride {
   /// alternative was loading ten full tracks every time the analysis screen
   /// opened. Null on every ride until then.
   double? smoothness;
+
+  /// Typical cornering lean, in degrees — the 95th percentile of the ride's
+  /// estimated lean samples.
+  ///
+  /// A percentile rather than the maximum on purpose: the two largest raw maxima
+  /// in the whole recorded history belong to the GPS-blackout train rides, where
+  /// the heading discontinuity across the dead zone manufactures a corner that
+  /// never happened. See `docs/lean-angle-design.md`. Null until Phase 2 writes
+  /// it, and on any ride whose track is too sparse or too slow to estimate from.
+  double? leanP95Degrees;
+
+  /// The largest lean the ride can actually support, in degrees — a peak
+  /// corroborated by consecutive samples, with blackout-adjacent ones excluded.
+  ///
+  /// Stored alongside [leanP95Degrees] because these are the two numbers worth
+  /// comparing *across* rides; the band histogram the analysis tab draws is
+  /// recomputed from the track it has already loaded rather than persisted.
+  double? leanPeakDegrees;
 }

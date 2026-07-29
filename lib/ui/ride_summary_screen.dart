@@ -146,12 +146,12 @@ class _RideSummaryScreenState extends ConsumerState<RideSummaryScreen> {
     final cx = AppColors.of(context);
     final t = widget.telemetry;
     final unit = ref.watch(speedUnitProvider);
-    // Trip context: when a continuation is pending this ride is a leg of an open
+    // Trip context: when a continuation is pending this ride is a stint of an open
     // trip, so the summary offers Continue-later / Finish-trip instead of a
     // plain save.
     final tripState = ref.watch(trackingControllerProvider);
     final continuingTripId = tripState.continuingTripId;
-    final isTripLeg = continuingTripId != null;
+    final isTripStint = continuingTripId != null;
     final tripName = tripState.continuingTripName?.trim();
     final notifier = ref.read(trackingControllerProvider.notifier);
 
@@ -198,7 +198,7 @@ class _RideSummaryScreenState extends ConsumerState<RideSummaryScreen> {
           backgroundColor: cx.canvas,
           automaticallyImplyLeading: false,
           title: Text(
-            isTripLeg ? 'LEG COMPLETE' : 'RIDE COMPLETE',
+            isTripStint ? 'STINT COMPLETE' : 'RIDE COMPLETE',
             style: TextStyle(
               color: cx.accentInk,
               fontSize: 14,
@@ -234,7 +234,7 @@ class _RideSummaryScreenState extends ConsumerState<RideSummaryScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        if (isTripLeg) ...[
+                        if (isTripStint) ...[
                           _TripContextRow(tripName: tripName),
                           const SizedBox(height: 14),
                         ],
@@ -342,7 +342,7 @@ class _RideSummaryScreenState extends ConsumerState<RideSummaryScreen> {
                         _NameSection(
                           controller: _nameController,
                           enabled: !_busy,
-                          label: isTripLeg ? 'LEG NAME' : 'RIDE NAME',
+                          label: isTripStint ? 'STINT NAME' : 'RIDE NAME',
                           suggestions:
                               insight?.nameSuggestions ?? const <String>[],
                           onPick: (s) => setState(() {
@@ -352,15 +352,15 @@ class _RideSummaryScreenState extends ConsumerState<RideSummaryScreen> {
                           }),
                         ),
                         const SizedBox(height: 16),
-                        // Primary action. Standalone ride → SAVE RIDE. A trip leg →
-                        // CONTINUE LATER (keep the journey open to add more legs).
+                        // Primary action. Standalone ride → SAVE RIDE. A trip stint →
+                        // CONTINUE LATER (keep the journey open to add more stints).
                         SizedBox(
                           height: 60,
                           child: ElevatedButton(
                             onPressed: _busy
                                 ? null
                                 : () => _run(
-                                      isTripLeg
+                                      isTripStint
                                           ? (n) => notifier.saveAndContinueTrip(n)
                                           : notifier.saveFinishedRide,
                                     ),
@@ -373,7 +373,7 @@ class _RideSummaryScreenState extends ConsumerState<RideSummaryScreen> {
                               ),
                             ),
                             child: Text(
-                              isTripLeg ? 'CONTINUE LATER' : 'SAVE RIDE',
+                              isTripStint ? 'CONTINUE LATER' : 'SAVE RIDE',
                               style: const TextStyle(
                                 fontSize: 20,
                                 fontWeight: FontWeight.w700,
@@ -383,15 +383,15 @@ class _RideSummaryScreenState extends ConsumerState<RideSummaryScreen> {
                         ),
                         const SizedBox(height: 10),
                         // Secondary action. Standalone ride → start a trip from this
-                        // ride (via a sheet that explains what one is). A trip leg →
+                        // ride (via a sheet that explains what one is). A trip stint →
                         // finish the trip now.
                         SizedBox(
                           height: 52,
                           child: OutlinedButton(
                             onPressed: _busy
                                 ? null
-                                : (isTripLeg
-                                    ? () => _run(notifier.finishTripWithLeg)
+                                : (isTripStint
+                                    ? () => _run(notifier.finishTripWithStint)
                                     : _startTrip),
                             style: OutlinedButton.styleFrom(
                               foregroundColor: cx.accentInk,
@@ -401,7 +401,7 @@ class _RideSummaryScreenState extends ConsumerState<RideSummaryScreen> {
                               ),
                             ),
                             child: Text(
-                              isTripLeg ? 'FINISH TRIP' : 'CONTINUE AS A TRIP',
+                              isTripStint ? 'FINISH TRIP' : 'CONTINUE AS A TRIP',
                               style: const TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w700,
@@ -421,7 +421,7 @@ class _RideSummaryScreenState extends ConsumerState<RideSummaryScreen> {
     );
   }
 
-  /// Turns this ride into the first leg of a trip. The trip-name field lives in
+  /// Turns this ride into the first stint of a trip. The trip-name field lives in
   /// the sheet rather than on the summary: it used to sit there permanently,
   /// asking every rider to name a trip most of them never start, with no
   /// explanation of what one is (F16).
@@ -435,19 +435,58 @@ class _RideSummaryScreenState extends ConsumerState<RideSummaryScreen> {
   }
 }
 
-/// The sheet behind "Continue later": one sentence on what a trip is, then the
-/// name. Returns the (possibly empty) trip name, or null if dismissed.
+/// The sheet behind "Continue as a trip": one sentence on what a trip is, then
+/// the name. Returns the (possibly empty) trip name, or null if dismissed.
 Future<String?> _askTripName(BuildContext context, String rideName) {
-  final cx = AppColors.of(context);
-  final controller = TextEditingController();
   return showModalBottomSheet<String>(
     context: context,
-    backgroundColor: cx.surfaceRaised,
+    backgroundColor: AppColors.of(context).surfaceRaised,
     isScrollControlled: true,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
     ),
-    builder: (ctx) => Padding(
+    builder: (_) => _TripNameSheet(rideName: rideName),
+  );
+}
+
+/// The sheet's body, stateful purely so it *owns* its [TextEditingController].
+///
+/// It used to be a plain closure with `.whenComplete(controller.dispose)`, which
+/// looks right and isn't: a route's future completes the moment it is popped,
+/// which is the *start* of the exit transition, not the end. Dismissing the sheet
+/// by tapping the barrier therefore disposed the controller while the focused
+/// `TextField` was still mounted and animating out; the throw from inside the
+/// still-live field aborted Flutter's unmount walk partway, and the next frame
+/// failed the `_dependents.isEmpty` assertion with no hint of the real cause.
+///
+/// Owning it here ties disposal to this widget's own element, so it can only
+/// happen after the field is gone. Same reasoning as [showRenameDialog] —
+/// see `rename_dialog.dart`.
+class _TripNameSheet extends StatefulWidget {
+  const _TripNameSheet({required this.rideName});
+
+  /// The ride's name, quoted back so the rider can see naming the *trip* doesn't
+  /// rename the ride.
+  final String rideName;
+
+  @override
+  State<_TripNameSheet> createState() => _TripNameSheetState();
+}
+
+class _TripNameSheetState extends State<_TripNameSheet> {
+  final TextEditingController controller = TextEditingController();
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext ctx) {
+    final cx = AppColors.of(ctx);
+    final rideName = widget.rideName;
+    return Padding(
       // Lift clear of the keyboard the field is about to raise.
       padding: EdgeInsets.only(
           bottom: MediaQuery.of(ctx).viewInsets.bottom),
@@ -517,11 +556,11 @@ Future<String?> _askTripName(BuildContext context, String rideName) {
           ),
         ),
       ),
-    ),
-  ).whenComplete(controller.dispose);
+    );
+  }
 }
 
-/// "Part of “Weekend to Dieng”" — the leg's place in its trip.
+/// "Part of “Weekend to Dieng”" — the stint's place in its trip.
 class _TripContextRow extends StatelessWidget {
   const _TripContextRow({this.tripName});
 

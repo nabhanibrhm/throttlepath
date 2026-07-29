@@ -59,7 +59,7 @@ void main() {
   });
 
   test('the key follows the ride start time, not the fix timestamps', () {
-    // A leg recorded across a band boundary must be filed by when it *started* —
+    // A stint recorded across a band boundary must be filed by when it *started* —
     // otherwise the same commute lands in two different route buckets.
     final evening = deriveRoute(
       ride(start: DateTime(2026, 7, 28, 19)),

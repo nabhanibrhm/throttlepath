@@ -68,6 +68,22 @@ void main() {
       expect(t.pausedAtMs, isNull);
       expect(t.signalLost, isFalse);
       expect(t.pausedFor, isNull);
+      // Live lean arrived after this payload shape; absent must read as "nothing
+      // to show", which is also its normal resting state on a slow, upright ride.
+      expect(t.leanDegrees, isNull);
+    });
+
+    test('carries the live lean estimate, signed for direction', () {
+      final right = LiveTelemetry.fromMap(
+          legacyPayload()..addAll({'leanDegrees': 14.5}));
+      expect(right.leanDegrees, closeTo(14.5, 1e-9));
+      final left = LiveTelemetry.fromMap(
+          legacyPayload()..addAll({'leanDegrees': -14.5}));
+      expect(left.leanDegrees, closeTo(-14.5, 1e-9));
+      // Arrives as JSON across the isolate boundary, so an int must not throw.
+      final whole =
+          LiveTelemetry.fromMap(legacyPayload()..addAll({'leanDegrees': 12}));
+      expect(whole.leanDegrees, closeTo(12.0, 1e-9));
     });
 
     test('carries the pause timestamp and the blackout flag', () {

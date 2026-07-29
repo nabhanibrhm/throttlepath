@@ -22,7 +22,7 @@ import 'week_strip.dart';
 ///
 /// Each row leads with the name, then the distance, then the *shape* of the route
 /// — a rider recognises a ride from its outline long before they read its stats
-/// (F20). Trips render as a bracketed parent with their legs nested beneath (F21).
+/// (F20). Trips render as a bracketed parent with their stints nested beneath (F21).
 class HistoryScreen extends ConsumerStatefulWidget {
   const HistoryScreen({super.key});
 
@@ -285,7 +285,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                         unit: unit,
                         query: query,
                         onTap: () => openTrip(summary),
-                        onOpenLeg: openRide,
+                        onOpenStint: openRide,
                       ),
                   },
                 ),
@@ -438,10 +438,10 @@ class _TripEntry extends _Entry {
   @override
   bool matches(String query) => _haystack([
         summary.trip.name,
-        for (final leg in summary.stats.legs) ...[
-          leg.name,
-          leg.startPlace,
-          leg.endPlace,
+        for (final stint in summary.stats.stints) ...[
+          stint.name,
+          stint.startPlace,
+          stint.endPlace,
         ],
       ]).contains(query);
 }
@@ -707,7 +707,7 @@ class _EmptyState extends StatelessWidget {
 // --- Cards -------------------------------------------------------------------
 
 /// Banner card for an open (continuable) trip: an amber-accented summary of the
-/// legs so far with a Continue button that resumes the trip on the Record tab.
+/// stints so far with a Continue button that resumes the trip on the Record tab.
 class _OpenTripCard extends StatelessWidget {
   const _OpenTripCard({
     required this.summary,
@@ -726,8 +726,8 @@ class _OpenTripCard extends StatelessWidget {
     final cx = AppColors.of(context);
     final stats = summary.stats;
     final name = summary.trip.name?.trim();
-    final legCount = stats.legCount;
-    final legLabel = legCount == 1 ? '1 leg' : '$legCount legs';
+    final stintCount = stats.stintCount;
+    final stintLabel = stintCount == 1 ? '1 stint' : '$stintCount stints';
     final distance =
         '${unit.distanceMeters(stats.totalDistanceMeters).toStringAsFixed(1)} ${unit.distanceLabel}';
     return Material(
@@ -775,7 +775,7 @@ class _OpenTripCard extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                '$legLabel · $distance · ${_fmtDuration(stats.durationSeconds)}',
+                '$stintLabel · $distance · ${_fmtDuration(stats.durationSeconds)}',
                 style: TextStyle(color: cx.textDim, fontSize: 13),
               ),
               const SizedBox(height: 14),
@@ -970,11 +970,11 @@ class _RideCard extends StatelessWidget {
   }
 }
 
-/// A finished trip: the parent's combined stats, with its legs nested underneath
+/// A finished trip: the parent's combined stats, with its stints nested underneath
 /// behind a connector line (F21).
 ///
 /// Collapsed by default — the point of a trip is that it reads as *one* thing in
-/// the list — but expandable in place, because "which leg was the long one?" used
+/// the list — but expandable in place, because "which stint was the long one?" used
 /// to require opening a whole screen.
 class _TripCard extends StatefulWidget {
   const _TripCard({
@@ -982,14 +982,14 @@ class _TripCard extends StatefulWidget {
     required this.unit,
     required this.query,
     required this.onTap,
-    required this.onOpenLeg,
+    required this.onOpenStint,
   });
 
   final TripSummary summary;
   final SpeedUnit unit;
   final String query;
   final VoidCallback onTap;
-  final void Function(Ride leg) onOpenLeg;
+  final void Function(Ride stint) onOpenStint;
 
   @override
   State<_TripCard> createState() => _TripCardState();
@@ -1004,7 +1004,7 @@ class _TripCardState extends State<_TripCard> {
     final stats = widget.summary.stats;
     final unit = widget.unit;
     final name = widget.summary.trip.name?.trim();
-    final legLabel = stats.legCount == 1 ? '1 leg' : '${stats.legCount} legs';
+    final stintLabel = stats.stintCount == 1 ? '1 stint' : '${stats.stintCount} stints';
 
     return Container(
       decoration: BoxDecoration(
@@ -1038,7 +1038,7 @@ class _TripCardState extends State<_TripCard> {
                             Icon(Icons.alt_route, color: cx.accentInk, size: 15),
                             const SizedBox(width: 5),
                             Text(
-                              'TRIP · $legLabel',
+                              'TRIP · $stintLabel',
                               style: TextStyle(
                                 color: cx.accentInk,
                                 fontSize: kMinFontSize,
@@ -1110,7 +1110,7 @@ class _TripCardState extends State<_TripCard> {
               ],
             ),
           ),
-          if (stats.legCount > 0)
+          if (stats.stintCount > 0)
             InkWell(
               onTap: () => setState(() => _expanded = !_expanded),
               child: Container(
@@ -1122,7 +1122,7 @@ class _TripCardState extends State<_TripCard> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(
-                      _expanded ? 'Hide legs' : 'Show $legLabel',
+                      _expanded ? 'Hide stints' : 'Show $stintLabel',
                       style: TextStyle(
                         color: cx.accentInk,
                         fontSize: 13,
@@ -1149,14 +1149,14 @@ class _TripCardState extends State<_TripCard> {
               padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
               child: Column(
                 children: [
-                  for (var i = 0; i < stats.legs.length; i++)
-                    _LegRow(
-                      leg: stats.legs[i],
+                  for (var i = 0; i < stats.stints.length; i++)
+                    _StintRow(
+                      stint: stats.stints[i],
                       index: i + 1,
-                      isLast: i == stats.legs.length - 1,
+                      isLast: i == stats.stints.length - 1,
                       unit: unit,
                       query: widget.query,
-                      onTap: () => widget.onOpenLeg(stats.legs[i]),
+                      onTap: () => widget.onOpenStint(stats.stints[i]),
                     ),
                 ],
               ),
@@ -1167,12 +1167,12 @@ class _TripCardState extends State<_TripCard> {
   }
 }
 
-/// One nested leg: a numbered node on a vertical connector, then the leg's name
+/// One nested stint: a numbered node on a vertical connector, then the stint's name
 /// and distance. The connector is what makes "these belong together, in this
 /// order" legible without a caption.
-class _LegRow extends StatelessWidget {
-  const _LegRow({
-    required this.leg,
+class _StintRow extends StatelessWidget {
+  const _StintRow({
+    required this.stint,
     required this.index,
     required this.isLast,
     required this.unit,
@@ -1180,7 +1180,7 @@ class _LegRow extends StatelessWidget {
     required this.onTap,
   });
 
-  final Ride leg;
+  final Ride stint;
   final int index;
   final bool isLast;
   final SpeedUnit unit;
@@ -1190,10 +1190,10 @@ class _LegRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cx = AppColors.of(context);
-    final name = leg.name?.trim().isNotEmpty == true
-        ? leg.name!.trim()
-        : 'Leg $index';
-    final routeLabel = PlaceRouteLabel.label(leg.startPlace, leg.endPlace);
+    final name = stint.name?.trim().isNotEmpty == true
+        ? stint.name!.trim()
+        : 'Stint $index';
+    final routeLabel = PlaceRouteLabel.label(stint.startPlace, stint.endPlace);
     return InkWell(
       onTap: onTap,
       child: IntrinsicHeight(
@@ -1213,8 +1213,8 @@ class _LegRow extends StatelessWidget {
                       shape: BoxShape.circle,
                     ),
                   ),
-                  // The trailing leg's line stops at its own node — a connector
-                  // running past the last leg implies another one is coming.
+                  // The trailing stint's line stops at its own node — a connector
+                  // running past the last stint implies another one is coming.
                   Expanded(
                     child: Container(
                       width: 1.5,
@@ -1245,7 +1245,7 @@ class _LegRow extends StatelessWidget {
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          '${unit.distanceMeters(leg.totalDistanceMeters).toStringAsFixed(2)} ${unit.distanceLabel}',
+                          '${unit.distanceMeters(stint.totalDistanceMeters).toStringAsFixed(2)} ${unit.distanceLabel}',
                           style: TextStyle(
                             color: cx.textDim,
                             fontSize: 13,
@@ -1258,7 +1258,7 @@ class _LegRow extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       [
-                        _formatDate(leg.startTime),
+                        _formatDate(stint.startTime),
                         ?routeLabel,
                       ].join(' · '),
                       maxLines: 1,
