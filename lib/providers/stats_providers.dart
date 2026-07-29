@@ -95,3 +95,15 @@ final rideInsightProvider =
     distanceVsAvgFraction: distanceVsAverage(ride, rider),
   );
 });
+
+/// Smoothness scores of the rides immediately before this one — the sample the
+/// analysis screen's "smoother than 8 of your last 10 rides" is measured against.
+///
+/// Reads the persisted `Ride.smoothness` rather than re-scoring, which is the
+/// whole reason the field exists: the alternative is loading ten full tracks
+/// every time the Accel tab is opened.
+final recentSmoothnessProvider =
+    FutureProvider.autoDispose.family<List<double>, int>((ref, rideId) {
+  return DatabaseService.instance
+      .getRecentSmoothnessScores(excludeRideId: rideId);
+});

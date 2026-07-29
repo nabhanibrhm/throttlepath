@@ -4,16 +4,22 @@ import 'package:flutter/material.dart';
 import '../core/units.dart';
 import '../data/models/track_point.dart';
 import '../theme/app_theme.dart';
+import 'chart_frame.dart';
+import 'chart_math.dart';
 
-/// Dual-axis profile over time: a filled green **elevation** area in the
-/// background with the **speed** line laid over it. Gives the speed data
-/// physical context — you can see speed bleed off on a climb and peak on a
-/// descent. Left axis is speed (rider's unit), right axis is elevation (m).
+/// Dual-axis profile over time: a filled **elevation** area in the background
+/// with the **speed** line laid over it. Gives the speed data physical context —
+/// you can see speed bleed off on a climb and peak on a descent.
+///
+/// Each axis is coloured to its series (F28): the left ticks are amber like the
+/// speed line, the right ticks teal like the elevation fill. Two unlabelled
+/// columns of numbers on either side of a two-series chart is a puzzle; colour
+/// answers it without spending a word.
 ///
 /// fl_chart shares one y-scale, so elevation is linearly mapped onto the speed
 /// axis and the right-hand tick labels are mapped back to real metres. Skipped
 /// entirely when the track has no usable altitude or no real elevation change.
-class ElevationSpeedChart extends StatelessWidget {
+class ElevationSpeedChart extends StatefulWidget {
   const ElevationSpeedChart({
     super.key,
     required this.points,
@@ -23,11 +29,8 @@ class ElevationSpeedChart extends StatelessWidget {
   final List<TrackPoint> points;
   final SpeedUnit unit;
 
-  static const Color _speedColor = Color(0xFF3B82F6); // blue
-  static const Color _elevColor = Color(0xFF22C55E); // green
-
   /// Minimum elevation swing (m) for the chart to be worth showing.
-  static const double _minElevRange = 2.0;
+  static const double minElevRange = 2.0;
 
   /// Window (samples) of the centred moving average used to tame raw GNSS
   /// vertical jitter before plotting and summing gain/loss.
@@ -38,11 +41,19 @@ class ElevationSpeedChart extends StatelessWidget {
   /// capturing gradual climbs (which a per-step floor would silently drop).
   static const double _gainThreshold = 3.0;
 
-  static const int _maxPoints = 300;
+  @override
+  State<ElevationSpeedChart> createState() => _ElevationSpeedChartState();
+}
+
+class _ElevationSpeedChartState extends State<ElevationSpeedChart> {
+  bool _showSpeed = true;
+  bool _showElev = true;
 
   @override
   Widget build(BuildContext context) {
     final cx = AppColors.of(context);
+    final points = widget.points;
+    final unit = widget.unit;
     final start = points.first.timestamp;
 
     // Raw altitude series (only points that carry altitude), paired with time.
@@ -58,7 +69,7 @@ class ElevationSpeedChart extends StatelessWidget {
 
     // Smooth away raw GNSS vertical jitter before it reaches the plot or the
     // gain/loss sums.
-    final alt = _movingAverage(rawAlt, _smoothWindow);
+    final alt = _movingAverage(rawAlt, ElevationSpeedChart._smoothWindow);
 
     final elev = <FlSpot>[]; // (tSec, metres) — real metres for now
     var eMin = alt.first, eMax = alt.first;
@@ -68,7 +79,9 @@ class ElevationSpeedChart extends StatelessWidget {
       if (alt[i] > eMax) eMax = alt[i];
     }
 
-    if ((eMax - eMin) < _minElevRange) return const SizedBox.shrink();
+    if ((eMax - eMin) < ElevationSpeedChart.minElevRange) {
+      return const SizedBox.shrink();
+    }
 
     // Gain/loss by hysteresis: only commit a move once it has drifted at least
     // _gainThreshold from the running reference, then re-anchor. Captures slow
@@ -77,10 +90,10 @@ class ElevationSpeedChart extends StatelessWidget {
     var ref = alt.first;
     for (final a in alt) {
       final d = a - ref;
-      if (d >= _gainThreshold) {
+      if (d >= ElevationSpeedChart._gainThreshold) {
         gain += d;
         ref = a;
-      } else if (d <= -_gainThreshold) {
+      } else if (d <= -ElevationSpeedChart._gainThreshold) {
         loss += -d;
         ref = a;
       }
@@ -100,44 +113,85 @@ class ElevationSpeedChart extends StatelessWidget {
     final eRange = eMax - eMin;
     // Map real metres onto the shared speed axis.
     double ePlot(double metres) => (metres - eMin) / eRange * maxY;
-    final elevScaled = [
-      for (final s in elev) FlSpot(s.x, ePlot(s.y)),
-    ];
+    double eUnplot(double plotted) => eMin + (plotted / maxY) * eRange;
+    final elevScaled = [for (final s in elev) FlSpot(s.x, ePlot(s.y))];
 
     final totalSec =
         points.last.timestamp.difference(start).inMilliseconds / 1000.0;
     final maxX = totalSec <= 0 ? 1.0 : totalSec;
 
-    return Container(
-      width: double.infinity,
-      color: cx.canvas,
-      padding: const EdgeInsets.fromLTRB(22, 8, 22, 24),
+    // Bars are built conditionally, so remember what each index *is* — the
+    // tooltip has to un-map elevation back to metres and must not do that to the
+    // speed line when only one series is showing.
+    final bars = <LineChartBarData>[];
+    final isElevBar = <bool>[];
+    if (_showElev) {
+      bars.add(
+        LineChartBarData(
+          spots: downsampleSpots(elevScaled, kChartMaxPoints),
+          isCurved: true,
+          curveSmoothness: 0.2,
+          preventCurveOverShooting: true,
+          color: cx.positive.withValues(alpha: 0.85),
+          barWidth: 1.5,
+          dotData: const FlDotData(show: false),
+          belowBarData: BarAreaData(
+            show: true,
+            color: cx.positive.withValues(alpha: 0.20),
+          ),
+        ),
+      );
+      isElevBar.add(true);
+    }
+    if (_showSpeed) {
+      bars.add(
+        LineChartBarData(
+          spots: downsampleSpots(speed, kChartMaxPoints),
+          isCurved: true,
+          curveSmoothness: 0.2,
+          preventCurveOverShooting: true,
+          color: cx.accent,
+          barWidth: 2,
+          isStrokeCapRound: true,
+          dotData: const FlDotData(show: false),
+          belowBarData: BarAreaData(show: false),
+        ),
+      );
+      isElevBar.add(false);
+    }
+
+    return ChartFrame(
+      title: 'ELEVATION VS. SPEED',
+      takeaway: _takeaway(gain, loss, eMax - eMin),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'ELEVATION VS. SPEED PROFILE',
-            style: TextStyle(
-              color: cx.textBright,
-              fontSize: 15,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.5,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Dual-axis profile over time',
-            style: TextStyle(color: cx.textDim, fontSize: 12),
-          ),
-          const SizedBox(height: 8),
           Row(
             children: [
-              _LegendDot(color: _speedColor, label: 'Speed (${unit.speedLabel})'),
-              const SizedBox(width: 16),
-              _LegendDot(color: _elevColor, label: 'Elevation (m)'),
+              LegendToggle(
+                color: cx.accent,
+                label: 'Speed (${unit.speedLabel})',
+                enabled: _showSpeed,
+                // Never let both go dark: an empty plot area reads as a bug, and
+                // there is no affordance left on the chart itself to recover.
+                onTap: () => setState(() {
+                  if (_showSpeed && !_showElev) return;
+                  _showSpeed = !_showSpeed;
+                }),
+              ),
+              const SizedBox(width: 12),
+              LegendToggle(
+                color: cx.positive,
+                label: 'Elevation (m)',
+                enabled: _showElev,
+                onTap: () => setState(() {
+                  if (_showElev && !_showSpeed) return;
+                  _showElev = !_showElev;
+                }),
+              ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           SizedBox(
             height: 220,
             child: LineChart(
@@ -150,8 +204,8 @@ class ElevationSpeedChart extends StatelessWidget {
                   show: true,
                   drawVerticalLine: false,
                   horizontalInterval: maxY / 2,
-                  getDrawingHorizontalLine: (_) =>
-                      FlLine(color: cx.border.withValues(alpha: 0.4), strokeWidth: 1),
+                  getDrawingHorizontalLine: (_) => FlLine(
+                      color: cx.border.withValues(alpha: 0.4), strokeWidth: 1),
                 ),
                 borderData: FlBorderData(
                   show: true,
@@ -161,88 +215,112 @@ class ElevationSpeedChart extends StatelessWidget {
                     bottom: BorderSide(color: cx.border),
                   ),
                 ),
-                lineTouchData: const LineTouchData(enabled: false),
+                // Drag-to-scrub with a value bubble (F26).
+                lineTouchData: LineTouchData(
+                  enabled: true,
+                  touchTooltipData: LineTouchTooltipData(
+                    getTooltipColor: (_) => cx.surfaceRaised,
+                    tooltipRoundedRadius: 8,
+                    tooltipBorder: BorderSide(color: cx.border),
+                    tooltipPadding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    fitInsideHorizontally: true,
+                    fitInsideVertically: true,
+                    getTooltipItems: (touched) => [
+                      for (final s in touched)
+                        if (isElevBar[s.barIndex])
+                          LineTooltipItem(
+                            '${eUnplot(s.y).round()} m',
+                            TextStyle(
+                              color: cx.positiveInk,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                              fontFeatures: kTabularFigures,
+                            ),
+                          )
+                        else
+                          LineTooltipItem(
+                            '${s.y.toStringAsFixed(0)} ${unit.speedLabel}',
+                            TextStyle(
+                              color: cx.accentInk,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                              fontFeatures: kTabularFigures,
+                            ),
+                          ),
+                    ],
+                  ),
+                  getTouchedSpotIndicator: (bar, indices) => [
+                    for (final _ in indices)
+                      TouchedSpotIndicatorData(
+                        FlLine(color: bar.color ?? cx.border, strokeWidth: 1.5),
+                        FlDotData(
+                          show: true,
+                          getDotPainter: (spot, a, b, c) => FlDotCirclePainter(
+                            radius: 4,
+                            color: bar.color ?? cx.accent,
+                            strokeWidth: 2,
+                            strokeColor: cx.canvas,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
                 titlesData: FlTitlesData(
                   show: true,
                   topTitles: const AxisTitles(
                       sideTitles: SideTitles(showTitles: false)),
                   leftTitles: AxisTitles(
                     sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 38, // room for the 12sp floor
+                      showTitles: _showSpeed,
+                      reservedSize: 40,
                       interval: maxY / 2,
                       getTitlesWidget: (v, meta) => Text(
                         v.toStringAsFixed(0),
-                        style: _tick(cx, _speedColor),
+                        style: _tick(cx.accentInk),
                       ),
                     ),
                   ),
                   rightTitles: AxisTitles(
                     sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 44, // room for the 12sp floor
+                      showTitles: _showElev,
+                      reservedSize: 46,
                       interval: maxY / 2,
-                      getTitlesWidget: (v, meta) {
-                        final metres = eMin + (v / maxY) * eRange;
-                        return Text(
-                          metres.toStringAsFixed(0),
-                          style: _tick(cx, _elevColor),
-                        );
-                      },
+                      getTitlesWidget: (v, meta) => Text(
+                        eUnplot(v).toStringAsFixed(0),
+                        style: _tick(cx.positiveInk),
+                      ),
                     ),
                   ),
                   bottomTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
-                      reservedSize: 28, // room for the 12sp floor
+                      reservedSize: 28,
                       interval: maxX / 4,
-                      getTitlesWidget: (v, meta) => Text(
-                        _fmtClock(v.round()),
-                        style: TextStyle(
-                          color: cx.textTertiary,
-                          fontSize: 12,
-                          fontFeatures: kTabularFigures,
-                        ),
-                      ),
+                      getTitlesWidget: (v, meta) =>
+                          Text(_fmtClock(v.round()), style: _tick(cx.textTertiary)),
                     ),
                   ),
                 ),
-                lineBarsData: [
-                  // Elevation area first, so the speed line draws on top.
-                  LineChartBarData(
-                    spots: _downsample(elevScaled),
-                    isCurved: true,
-                    curveSmoothness: 0.2,
-                    preventCurveOverShooting: true,
-                    color: _elevColor.withValues(alpha: 0.7),
-                    barWidth: 1.5,
-                    dotData: const FlDotData(show: false),
-                    belowBarData: BarAreaData(
-                      show: true,
-                      color: _elevColor.withValues(alpha: 0.22),
-                    ),
-                  ),
-                  LineChartBarData(
-                    spots: _downsample(speed),
-                    isCurved: true,
-                    curveSmoothness: 0.2,
-                    preventCurveOverShooting: true,
-                    color: _speedColor,
-                    barWidth: 2,
-                    isStrokeCapRound: true,
-                    dotData: const FlDotData(show: false),
-                    belowBarData: BarAreaData(show: false),
-                  ),
-                ],
+                lineBarsData: bars,
               ),
             ),
           ),
-          const SizedBox(height: 6),
-          Center(
-            child: Text(
-              'Time',
-              style: TextStyle(color: cx.textTertiary, fontSize: 12),
-            ),
+          const SizedBox(height: 8),
+          // The unit on each axis, stated once, in that axis's colour.
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              if (_showSpeed)
+                AxisCaption(unit.speedLabel.toUpperCase(), color: cx.accentInk)
+              else
+                const SizedBox.shrink(),
+              const AxisCaption('TIME INTO RIDE'),
+              if (_showElev)
+                AxisCaption('METRES', color: cx.positiveInk)
+              else
+                const SizedBox.shrink(),
+            ],
           ),
           const SizedBox(height: 18),
           Row(
@@ -257,9 +335,28 @@ class ElevationSpeedChart extends StatelessWidget {
     );
   }
 
-  TextStyle _tick(AppPalette cx, Color color) => TextStyle(
-        color: color.withValues(alpha: 0.9),
-        fontSize: 12,
+  /// Plain-language reading of the climb.
+  String _takeaway(double gain, double loss, double range) {
+    if (gain < 10 && loss < 10) {
+      return 'Essentially flat — under ${range.round()} m between the lowest '
+          'and highest point.';
+    }
+    if (gain > loss * 1.5) {
+      return 'A net climb: ${gain.round()} m gained against ${loss.round()} m '
+          'lost.';
+    }
+    if (loss > gain * 1.5) {
+      return 'A net descent: ${loss.round()} m lost against ${gain.round()} m '
+          'gained.';
+    }
+    return 'Rolling terrain — ${gain.round()} m climbed and ${loss.round()} m '
+        'descended, roughly balancing out.';
+  }
+
+  TextStyle _tick(Color color) => TextStyle(
+        color: color,
+        fontSize: kMinFontSize,
+        fontWeight: FontWeight.w600,
         fontFeatures: kTabularFigures,
       );
 
@@ -280,42 +377,6 @@ class ElevationSpeedChart extends StatelessWidget {
     }
     return out;
   }
-
-  /// Uniformly thins [spots] to at most [_maxPoints], always keeping the last.
-  static List<FlSpot> _downsample(List<FlSpot> spots) {
-    if (spots.length <= _maxPoints) return spots;
-    final stride = spots.length / _maxPoints;
-    final out = <FlSpot>[];
-    for (var i = 0; i < _maxPoints; i++) {
-      out.add(spots[(i * stride).floor()]);
-    }
-    out.add(spots.last);
-    return out;
-  }
-}
-
-class _LegendDot extends StatelessWidget {
-  const _LegendDot({required this.color, required this.label});
-
-  final Color color;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final cx = AppColors.of(context);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 10,
-          height: 10,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        ),
-        const SizedBox(width: 6),
-        Text(label, style: TextStyle(color: cx.textDim, fontSize: 12)),
-      ],
-    );
-  }
 }
 
 class _ElevStat extends StatelessWidget {
@@ -331,7 +392,8 @@ class _ElevStat extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: TextStyle(color: cx.textTertiary, fontSize: 12)),
+          Text(label,
+              style: TextStyle(color: cx.textTertiary, fontSize: kMinFontSize)),
           const SizedBox(height: 6),
           Text(
             value,
@@ -339,6 +401,7 @@ class _ElevStat extends StatelessWidget {
               color: cx.textBright,
               fontSize: 20,
               fontWeight: FontWeight.w700,
+              fontFeatures: kTabularFigures,
             ),
           ),
         ],

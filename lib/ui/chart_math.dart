@@ -27,15 +27,28 @@ double niceInterval(double range, int target) {
 String fmtTick(double v, double interval) =>
     interval < 1 ? v.toStringAsFixed(1) : v.toStringAsFixed(0);
 
+/// Target point count for a painted series.
+///
+/// A 1 Hz trace over an hour is 3600 samples; fl_chart lays out and paints every
+/// one of them on every frame, which is what made the chart pager sticky to swipe
+/// (F26). At 300 points a full-width chart still has ~1 sample per device pixel,
+/// so the drawn shape is indistinguishable.
+const int kChartMaxPoints = 300;
+
 /// Uniformly thins [spots] to at most [max] points, always keeping the first
 /// and last, so a long series stays cheap to redraw without changing its shape.
-List<FlSpot> downsampleSpots(List<FlSpot> spots, int max) {
-  if (spots.length <= max) return spots;
-  final stride = spots.length / max;
-  final out = <FlSpot>[];
+List<FlSpot> downsampleSpots(List<FlSpot> spots, int max) =>
+    downsample(spots, max);
+
+/// Uniformly thins [xs] to at most [max] entries, always keeping the first and
+/// last. Type-agnostic so the scatter and line series thin identically.
+List<T> downsample<T>(List<T> xs, int max) {
+  if (xs.length <= max) return xs;
+  final stride = xs.length / max;
+  final out = <T>[];
   for (var i = 0; i < max; i++) {
-    out.add(spots[(i * stride).floor()]);
+    out.add(xs[(i * stride).floor()]);
   }
-  out.add(spots.last);
+  out.add(xs.last);
   return out;
 }

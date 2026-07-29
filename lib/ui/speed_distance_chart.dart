@@ -24,7 +24,7 @@ class SpeedDistanceChart extends StatelessWidget {
     required this.spots,
     required this.avgSpeedKmh,
     required this.unit,
-    this.maxPoints = 240,
+    this.maxPoints = kChartMaxPoints,
     this.interactive = false,
   });
 
@@ -118,7 +118,7 @@ class SpeedDistanceChart extends StatelessWidget {
                   leftTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
-                      reservedSize: 38, // room for the 12sp floor
+                      reservedSize: 40, // room for the 12sp floor
                       interval: yInterval,
                       getTitlesWidget: (v, meta) =>
                           Text(fmtTick(v, yInterval), style: tickStyle),

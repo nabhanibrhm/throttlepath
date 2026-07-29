@@ -38,14 +38,19 @@ class SettingsService {
     return File('${dir.path}/$name');
   }
 
-  /// Loads the saved theme mode. Defaults to dark (the app's original look) on
-  /// first run or any read error.
+  /// Loads the saved theme mode.
+  ///
+  /// Defaults to dark (the app's original look) on first run or any read error.
+  /// `system` is now a real, storable third value — it used to collapse into dark
+  /// on read, so a rider who wanted the app to follow the phone had no way to say
+  /// so, and the setting was a two-state switch pretending to be a preference.
   Future<ThemeMode> loadThemeMode() async {
     try {
       final f = await _resolve();
       if (!await f.exists()) return ThemeMode.dark;
       return switch ((await f.readAsString()).trim()) {
         'light' => ThemeMode.light,
+        'system' => ThemeMode.system,
         _ => ThemeMode.dark,
       };
     } catch (_) {
@@ -57,7 +62,11 @@ class SettingsService {
   Future<void> saveThemeMode(ThemeMode mode) async {
     try {
       final f = await _resolve();
-      await f.writeAsString(mode == ThemeMode.light ? 'light' : 'dark');
+      await f.writeAsString(switch (mode) {
+        ThemeMode.light => 'light',
+        ThemeMode.system => 'system',
+        ThemeMode.dark => 'dark',
+      });
     } catch (_) {
       // best-effort; the choice still applies for this session
     }

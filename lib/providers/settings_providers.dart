@@ -7,6 +7,10 @@ import '../core/units.dart';
 import '../services/settings_service.dart';
 
 /// Holds the active [ThemeMode] and persists every change.
+///
+/// Three-way (System / Light / Dark), not a switch: "Dark mode: off" cannot
+/// express "follow the phone", which is what most riders actually want — the app
+/// going light at sunrise with the rest of the device.
 class ThemeModeController extends StateNotifier<ThemeMode> {
   ThemeModeController(super.state);
 
@@ -15,11 +19,15 @@ class ThemeModeController extends StateNotifier<ThemeMode> {
     state = mode;
     await SettingsService.instance.saveThemeMode(mode);
   }
-
-  /// Flip between dark and light.
-  Future<void> toggle() =>
-      setMode(state == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark);
 }
+
+/// Rider-facing name for a theme mode. Lives beside the controller so the
+/// Settings row and any future surface cannot word it differently.
+String themeModeLabel(ThemeMode mode) => switch (mode) {
+      ThemeMode.system => 'System',
+      ThemeMode.light => 'Light',
+      ThemeMode.dark => 'Dark',
+    };
 
 /// The app's theme mode. Seeded in `main()` (via override) with the persisted
 /// value so there is no theme flash on launch.

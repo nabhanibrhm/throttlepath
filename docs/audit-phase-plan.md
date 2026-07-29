@@ -380,31 +380,135 @@ backfill path over 25 real rides is what proves the derivation, and it does look
 
 ---
 
-## Phase 6 — Analysis & charts
-*fixes F25, F26, F27, F28, F29, F30 · ~1 week*
+## Phase 6 — Analysis & charts ✅ BUILT (device pass pending)
+*fixes F25, F26, F27, F28, F29, F30 · built with Phase 7 in one pass*
 
-- [ ] 6.1 `PageView` + 4px dots → scrollable **labelled TabBar** (Speed · Zones · Accel · Elevation) (F25).
-- [ ] 6.2 Title + one-sentence plain-language takeaway on all four. Chart 1 currently has no title at all.
-- [ ] 6.3 Axis labels to 12sp with the unit stated once; `reservedSize` up. *(Note: current axes are 10–11sp, not the 8sp the audit claims — smaller change than budgeted.)*
-- [ ] 6.4 Downsample to ~300 points before painting (1 Hz traces are drawing thousands — that is the swipe stickiness).
-- [ ] 6.5 Drag-to-scrub + value bubble on charts 2–4. *(Chart 1 already ships this via `SpeedDistanceChart(interactive: true)`.)* Legend chips actually toggle series.
-- [ ] 6.6 Zones: delete the donut, keep the table, add one stacked bar ordered slow→fast, labelled in place (F27). A `Row` of `Expanded` flex segments — no chart library needed.
-- [ ] 6.7 Accel → **smoothness score /100** with "smoother than 8 of your last 10 rides" (reads `Ride.smoothness` persisted in 4.1 — otherwise it loads 10 full tracks). Bands labelled "accelerating"/"braking"; axis states km/h/s (F28).
-- [ ] 6.8 Elevation: left tick labels amber, right teal, colour-tied to their series (F28).
-- [ ] 6.9 Map tap-to-expand full screen; legend gets numeric ticks (F30).
-- [ ] 6.10 Unify app bars — back · title (tap to rename) · share · overflow on **both** ride detail and trip detail (F29). "Reopen trip" becomes "Add the next leg".
+- [x] 6.1 `PageView` + 4px dots → **scrollable labelled TabBar** (Speed · Zones ·
+      Smoothness · Elevation) in `_ChartTabs`. The dots said how many charts existed
+      and nothing about what was in them, so reaching the elevation profile meant
+      swiping past everything else to see what turned up. The pager still measures
+      each tab's natural height — the tabs hold genuinely different amounts (a
+      stacked bar over a table vs. a scatter), so one fixed height either clips the
+      tallest or strands the shortest under empty canvas.
+- [x] 6.2 New `lib/ui/chart_frame.dart` — `ChartFrame` (title + one-sentence
+      takeaway + optional trailing widget), `AxisCaption`, `LegendToggle`. Every
+      takeaway is **computed from the same data the chart draws**, not written: the
+      dominant speed zone, the score and its band, the net climb, where the peak
+      fell. Chart 1 had no title at all.
+- [x] 6.3 Axis ticks are all on `kMinFontSize`, `reservedSize` up (38→40 left, 44→46
+      right), and each axis states its unit **once** via `AxisCaption` instead of on
+      every tick or nowhere.
+- [x] 6.4 `kChartMaxPoints = 300` in `chart_math.dart`, plus a type-agnostic
+      `downsample<T>` so the scatter thins on the same rule as the lines.
+      `downsampleSpots` is kept as a thin alias — call sites read better with it.
+- [x] 6.5 Scrub + value bubble on the smoothness scatter and the elevation chart;
+      the zones "scrub" is tap-a-segment/row, which is the honest analogue for a
+      distribution (there is no x-axis to drag along). `LegendToggle` chips really do
+      hide their series — with a guard so the **last visible one can't be switched
+      off**, since an empty plot reads as a bug and leaves no affordance to recover.
+- [x] 6.6 Donut deleted. One stacked bar, slowest→fastest, segments labelled in place
+      above `_labelFloor` (13% — below that "12%" won't fit at the 12sp floor), over
+      the same table. Sub-percent slivers clamp to a flex of 1 so they can't vanish
+      from a bar whose job is to account for the whole.
+- [x] 6.7 New `lib/core/smoothness.dart` — `analyseSmoothness` returns the samples,
+      the hard-event counts, the RMS and a 0–100 score
+      (`100 · (1 − rms/kZeroScoreRms)`, clamped). **One definition, two consumers:**
+      the chart draws it and `route_derivation.dart` persists it to `Ride.smoothness`,
+      which is exactly what the Phase 4 migration reserved the field for. The axis is
+      in **km/h (or mph) per second**, not m/s² — "1.5 m/s²" means nothing on a
+      handlebar, "5 km/h every second" does.
+- [x] 6.8 Elevation axes colour-tied to their series: speed amber
+      (`accent` fill / `accentInk` ticks), elevation teal (`positive` / `positiveInk`)
+      — reusing tokens Phase 1 already defined rather than inventing hues, and
+      keeping the fill/ink split the palette rule requires.
+- [x] 6.9 `lib/ui/route_map_view.dart` — the map extracted so the inline header and
+      the new `FullScreenRouteMap` are the *same* map, not two that can drift. An
+      `EXPAND` chip announces the affordance (a map that already pans and zooms gives
+      no sign that tapping does a third thing). `SpeedLegend` gained numeric ticks at
+      0 / mid / max — two end labels gave the range but left every colour between
+      them unreadable, which is the whole point of colouring the route.
+- [x] 6.10 New `lib/ui/detail_app_bar.dart`, used by both detail screens: back ·
+      title · share · overflow. Rename is now **tap the title** on both (ride detail
+      had a pencil and no menu; trip detail had a menu and no pencil), with a menu
+      entry as the discoverable path. "Reopen trip" → **"Add the next leg"**.
 
-**Verify:** analyze · test · device.
+### One crash only the test caught
+
+`FlGridData.horizontalInterval couldn't be zero` — a ride held at a genuinely
+constant speed has a max |a| of **zero**, so the scatter's y-scale collapsed and
+fl_chart asserted. The old chart seeded its running maximum at `1.0`, which hid the
+case for years; `AccelAnalysis` reports the truth, so the floor now lives in the
+chart where it is a *drawing* concern rather than silently distorting the data.
+
+### Two decisions worth recording
+
+**`accel_brake_chart.dart` is gone, replaced by `smoothness_chart.dart`.** The tab is
+no longer "here is a scatter of accelerations" but "here is how smoothly you rode,
+and here is the evidence" — the file name should say which.
+
+**The backfill now remembers what it tried.** Adding `smoothness` to the derived-field
+work-list created a ride that can never satisfy the query: a track too sparse to score
+scores null however often it is re-read, so `getRidesMissingDerived()` would return it
+forever. `RouteBackfill` keeps an in-session `_attempted` set, capping the waste at one
+pass per app launch instead of one per History visit. The alternative — a stored
+"unscoreable" sentinel — would have to be understood by every future reader of the
+field. `setRideRoute`/`getRidesMissingRoute` were renamed to `setRideDerived`/
+`getRidesMissingDerived` to match what they now cover.
+
+**Verify:** analyze clean ✅ · **256 tests green** ✅ (37 new in
+`test/smoothness_test.dart` + `test/ride_analysis_test.dart`) · debug APK builds ✅ ·
+**device pass still owed.**
 
 ---
 
-## Phase 7 — Settings regroup + accessibility
-*fixes the rest of F32, homes the F13 settings · ~3–4 days*
+## Phase 7 — Settings regroup + accessibility ✅ BUILT (device pass pending)
+*fixes the rest of F32, homes the F13 settings*
 
-- [ ] 7.1 Regroup: UNITS · DISPLAY · RECORDING · DATA · About. Every row ≥48dp.
-- [ ] 7.2 "Dark mode" → three-way **Theme (System / Light / Dark)**. `SettingsService.loadThemeMode` currently collapses `ThemeMode.system` into dark — that has to change.
-- [ ] 7.3 Export all rides (GPX or CSV) under DATA.
-- [ ] 7.4 A11y pass: `Semantics` labels on every icon-only button (app-bar pencil, share, recenter, overflow are all unlabelled to TalkBack); `liveRegion: true` on live speed with a spoken form, throttled to 5s; `Semantics` summary on charts reusing the takeaway sentence; `MediaQuery.textScaler` so labels reflow instead of clipping.
+- [x] 7.1 Regrouped: **UNITS · DISPLAY · RIDE SCREEN · RECORDING · DATA · ABOUT**.
+      Speed unit got its own heading rather than sharing "Display" with the theme — a
+      measurement system changes every number in the app; a colour scheme doesn't.
+      Every row is `minHeight: 48`, and *minHeight* not `height`, so a larger system
+      font grows the row instead of overflowing it.
+- [x] 7.2 "Dark mode" switch → three-way **Theme (System / Light / Dark)** as a
+      segmented control. `SettingsService` now stores and reads `'system'`;
+      `main.dart` already passed `themeMode` to `MaterialApp` with both themes, so
+      nothing else had to change. `ThemeModeController.toggle()` is gone (a two-state
+      verb for a three-state setting), and `themeModeLabel()` lives beside the
+      controller so the wording can't drift.
+- [x] 7.3 New `lib/services/rides_csv_export.dart` — **Export all rides** under DATA,
+      one CSV of every finished ride's stats through the existing `shareFile` channel.
+      **CSV rather than a folder of GPX**: GPX is per-ride and carries the track, so
+      thirty of them means thirty share sheets or a zip, and zipping needs a dependency
+      the app doesn't have. Per-ride GPX already ships from the summary and detail
+      screens — the two are complementary. Fields are RFC 4180 quoted, because
+      "Bandung, then home" would otherwise silently shift every later column.
+- [x] 7.4 A11y pass. Every `IconButton` already carried a `tooltip` (which *is* its
+      semantic label) — the audit's claim here was stale. What was actually missing:
+      new `lib/ui/live_speed_announcer.dart` puts `liveRegion: true` on the live speed
+      with a **spoken** form ("42 kilometres per hour", not "42 kay em slash aitch")
+      **throttled to 5 s** — the readout updates ~1 Hz, and an unthrottled live region
+      would talk over everything else once a second forever. `ChartFrame` reuses its
+      takeaway as the chart's `Semantics` label (a plot is otherwise silent). Settings
+      rows announce label/value/hint once, with the trailing widget `ExcludeSemantics`d
+      so nothing is read twice, and on/off rows report as **toggled** rather than as
+      buttons. Section headings are marked as headings.
+
+### The throttle was wrong on its first write, and the test caught it
+
+`_announcedAt` started null, so the *first* GPS tick after mount went straight
+through — the throttle began one window late. Seeded at mount now: the initial value
+**is** an announcement.
+
+### Text scale is tested, not asserted
+
+`test/settings_a11y_test.dart` pumps Settings at **1.0× / 1.3× / 1.6×** in both themes
+and fails on any captured layout exception. It also pins the real 353dp width while
+using a tall viewport for the grouping assertions — scrolling to reach the later
+sections would destroy the earlier ones, and an ordering check needs them all built at
+once.
+
+**Verify:** analyze clean ✅ · 256 tests green ✅ (25 new in
+`test/settings_a11y_test.dart`) · debug APK builds ✅ · **device pass still owed.**
 
 ---
 

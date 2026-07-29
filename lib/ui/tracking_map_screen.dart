@@ -22,6 +22,7 @@ import '../services/permission_service.dart';
 import '../services/tracking_service.dart' show LiveTelemetry;
 import '../theme/app_theme.dart';
 import 'analog_speed_gauge.dart';
+import 'live_speed_announcer.dart';
 import 'ride_display_switcher.dart';
 import 'ride_summary_screen.dart';
 import 'live_speed_chart.dart';
@@ -1022,12 +1023,17 @@ class _TelemetrySheet extends StatelessWidget {
               // The analog gauge replaces the numeral only for live speed — the
               // 3-2-1 countdown stays a big digit, since there's nothing to sweep.
               if (gaugeStyle == SpeedGaugeStyle.analog && !countingDown)
-                AnalogSpeedGauge(
+                LiveSpeedAnnouncer(
                   speed: unit.speed(speedKmh),
-                  maxSpeed: unit.speed(t?.maxSpeedKmh ?? 0),
-                  topOfScale: AnalogSpeedGauge.topFor(unit),
                   unitLabel: unit.speedLabel,
-                  dimmed: !recording || frozen,
+                  active: recording && !frozen,
+                  child: AnalogSpeedGauge(
+                    speed: unit.speed(speedKmh),
+                    maxSpeed: unit.speed(t?.maxSpeedKmh ?? 0),
+                    topOfScale: AnalogSpeedGauge.topFor(unit),
+                    unitLabel: unit.speedLabel,
+                    dimmed: !recording || frozen,
+                  ),
                 )
               else
                 // While counting down, the number itself is the skip target —
@@ -1037,38 +1043,58 @@ class _TelemetrySheet extends StatelessWidget {
                 GestureDetector(
                   onTap: countingDown ? onSkipCountdown : null,
                   behavior: HitTestBehavior.opaque,
-                  child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.baseline,
-                  textBaseline: TextBaseline.alphabetic,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      heroNumber,
-                      style: TextStyle(
-                        color: countingDown
-                            ? cx.accentInk
-                            : (frozen ? cx.textDim : cx.textBright),
-                        // The one hero on the screen (F14). Distance and elapsed
-                        // sit a full step below it, and avg/peak/moving two.
-                        fontSize: countingDown ? 84 : 64,
-                        height: 1,
-                        fontWeight: FontWeight.w800,
-                        // Without tabular digits this readout re-flows on every
-                        // GPS tick as "1" and "8" swap widths — the single
-                        // worst thing you can do to a number read in motion.
-                        fontFeatures: kTabularFigures,
-                      ),
-                    ),
-                    if (!countingDown) ...[
-                      const SizedBox(width: 8),
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Text(unit.speedLabel,
-                            style: TextStyle(color: cx.textDim, fontSize: 18)),
-                      ),
-                    ],
-                  ],
-                  ),
+                  child: Builder(builder: (_) {
+                    final row = Row(
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          heroNumber,
+                          style: TextStyle(
+                            color: countingDown
+                                ? cx.accentInk
+                                : (frozen ? cx.textDim : cx.textBright),
+                            // The one hero on the screen (F14). Distance and
+                            // elapsed sit a full step below it, avg/peak two.
+                            fontSize: countingDown ? 84 : 64,
+                            height: 1,
+                            fontWeight: FontWeight.w800,
+                            // Without tabular digits this readout re-flows on
+                            // every GPS tick as "1" and "8" swap widths — the
+                            // single worst thing you can do to a number read in
+                            // motion.
+                            fontFeatures: kTabularFigures,
+                          ),
+                        ),
+                        if (!countingDown) ...[
+                          const SizedBox(width: 8),
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Text(unit.speedLabel,
+                                style:
+                                    TextStyle(color: cx.textDim, fontSize: 18)),
+                          ),
+                        ],
+                      ],
+                    );
+                    // A counting-down digit is a button, not a readout — say so,
+                    // and say what tapping it does.
+                    if (countingDown) {
+                      return Semantics(
+                        button: true,
+                        label: 'Starting in $heroNumber',
+                        hint: 'Tap to skip the countdown',
+                        child: ExcludeSemantics(child: row),
+                      );
+                    }
+                    return LiveSpeedAnnouncer(
+                      speed: unit.speed(speedKmh),
+                      unitLabel: unit.speedLabel,
+                      active: recording && !frozen,
+                      child: row,
+                    );
+                  }),
                 ),
               if (frozen) ...[
                 const SizedBox(height: 10),

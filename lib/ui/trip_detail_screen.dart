@@ -13,6 +13,7 @@ import '../providers/home_providers.dart';
 import '../providers/settings_providers.dart';
 import '../providers/tracking_providers.dart';
 import '../theme/app_theme.dart';
+import 'detail_app_bar.dart';
 import 'no_track_notice.dart';
 import 'place_route_label.dart';
 import 'rename_dialog.dart';
@@ -180,60 +181,44 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
 
     return Scaffold(
       backgroundColor: cx.canvas,
-      appBar: AppBar(
-        backgroundColor: cx.canvas,
-        foregroundColor: cx.textBright,
-        elevation: 0,
-        centerTitle: true,
-        shape: Border(bottom: BorderSide(color: cx.border)),
-        title: Text(
-          name?.isNotEmpty == true ? name! : 'Trip',
-          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
-        ),
-        actions: [
-          if (_busy || _sharing)
-            Padding(
-              padding: const EdgeInsets.only(right: 18),
-              child: Center(
-                child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2.2, color: cx.accentInk),
-                ),
-              ),
-            )
-          else ...[
-            IconButton(
-              icon: const Icon(Icons.share),
-              tooltip: 'Share trip',
-              onPressed: canShare ? _shareTrip : null,
+      appBar: DetailAppBar(
+        title: name?.isNotEmpty == true ? name! : 'Trip',
+        onRename: _renameTrip,
+        renameTooltip: 'Rename trip',
+        busy: _busy || _sharing,
+        onShare: canShare ? _shareTrip : null,
+        shareTooltip: 'Share trip',
+        onMenuSelected: (v) {
+          switch (v) {
+            case 'continue':
+              _continue();
+            case 'finish':
+              _finish();
+            case 'reopen':
+              _reopen();
+          }
+        },
+        menuItems: [
+          if (_isOpen) ...[
+            const DetailMenuItem(
+              value: 'continue',
+              icon: Icons.play_arrow,
+              label: 'Add the next leg',
             ),
-            PopupMenuButton<String>(
-              color: cx.surface,
-              icon: Icon(Icons.more_vert, color: cx.textBright),
-              onSelected: (v) {
-                switch (v) {
-                  case 'rename':
-                    _renameTrip();
-                  case 'continue':
-                    _continue();
-                  case 'finish':
-                    _finish();
-                  case 'reopen':
-                    _reopen();
-                }
-              },
-              itemBuilder: (_) => [
-                _menuItem('rename', Icons.edit_outlined, 'Rename trip', cx),
-                if (_isOpen) ...[
-                  _menuItem('continue', Icons.play_arrow, 'Continue trip', cx),
-                  _menuItem('finish', Icons.flag, 'Finish trip', cx),
-                ] else
-                  _menuItem('reopen', Icons.lock_open, 'Reopen trip', cx),
-              ],
+            const DetailMenuItem(
+              value: 'finish',
+              icon: Icons.flag,
+              label: 'Finish trip',
             ),
-          ],
+          ] else
+            // Was "Reopen trip" — a name for the state change rather than for
+            // what the rider came to do. Reopening is never the goal; adding
+            // another leg is, and reopening is just what it takes.
+            const DetailMenuItem(
+              value: 'reopen',
+              icon: Icons.lock_open,
+              label: 'Add the next leg',
+            ),
         ],
       ),
       body: legsAsync.when(
@@ -281,19 +266,6 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
     );
   }
 
-  PopupMenuItem<String> _menuItem(
-      String value, IconData icon, String label, AppPalette cx) {
-    return PopupMenuItem<String>(
-      value: value,
-      child: Row(
-        children: [
-          Icon(icon, color: cx.accentInk, size: 18),
-          const SizedBox(width: 12),
-          Text(label, style: TextStyle(color: cx.textBright)),
-        ],
-      ),
-    );
-  }
 }
 
 /// Thin "OPEN — CONTINUABLE" strip shown above the map for an open trip.

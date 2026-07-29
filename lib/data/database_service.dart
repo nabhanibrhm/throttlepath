@@ -116,34 +116,68 @@ class DatabaseService {
     });
   }
 
-  /// Stores the derived route identity + shape on a ride (see `route_key.dart`
-  /// and `route_blob.dart`). Written once when the ride finalises, and by the
+  /// Stores the fields derived from a ride's track — route identity + shape
+  /// (see `route_key.dart` / `route_blob.dart`) and its smoothness score (see
+  /// `smoothness.dart`). Written once when the ride finalises, and by the
   /// backfill for rides recorded before these fields existed. No-op if the ride
   /// was deleted in between.
-  Future<void> setRideRoute(
+  Future<void> setRideDerived(
     int rideId, {
     String? routeKey,
     List<double>? routeBlob,
+    double? smoothness,
   }) {
     return isar.writeTxn(() async {
       final ride = await isar.rides.get(rideId);
       if (ride == null) return;
       ride.routeKey = routeKey;
       ride.routeBlob = routeBlob;
+      ride.smoothness = smoothness;
       await isar.rides.put(ride);
     });
   }
 
-  /// Finished rides still missing a derived route (either field), newest first —
-  /// the work-list for the route backfill. Rides still recording are skipped:
-  /// their shape isn't final yet.
-  Future<List<Ride>> getRidesMissingRoute() {
+  /// Finished rides still missing any track-derived field, newest first — the
+  /// work-list for the backfill. Rides still recording are skipped: their track
+  /// isn't final yet.
+  Future<List<Ride>> getRidesMissingDerived() {
     return isar.rides
         .filter()
         .endTimeIsNotNull()
-        .group((q) => q.routeKeyIsNull().or().routeBlobIsNull())
+        .group((q) => q
+            .routeKeyIsNull()
+            .or()
+            .routeBlobIsNull()
+            .or()
+            .smoothnessIsNull())
         .sortByStartTimeDesc()
         .findAll();
+  }
+
+  /// Smoothness scores of the [limit] most recent finished rides that have one,
+  /// excluding [excludeRideId] — the sample the analysis screen phrases
+  /// "smoother than 8 of your last 10 rides" against.
+  ///
+  /// Excluding the ride being judged matters for the same reason it does in
+  /// [getRiderStats]: by the time the screen asks, the ride is already on disk and
+  /// would otherwise be compared against itself.
+  Future<List<double>> getRecentSmoothnessScores({
+    int limit = 10,
+    int excludeRideId = -1,
+  }) async {
+    final scores = await isar.rides
+        .filter()
+        .endTimeIsNotNull()
+        .and()
+        .smoothnessIsNotNull()
+        .and()
+        .not()
+        .idEqualTo(excludeRideId)
+        .sortByStartTimeDesc()
+        .limit(limit)
+        .smoothnessProperty()
+        .findAll();
+    return [for (final s in scores) ?s];
   }
 
   /// Deletes a ride and every track point that belongs to it.

@@ -1,12 +1,9 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:latlong2/latlong.dart';
 
 import '../core/geo.dart';
-import '../core/speed_palette.dart';
 import '../core/units.dart';
 import '../data/database_service.dart';
 import '../data/models/ride.dart';
@@ -14,15 +11,17 @@ import '../data/models/track_point.dart';
 import '../providers/history_providers.dart';
 import '../providers/settings_providers.dart';
 import '../theme/app_theme.dart';
-import 'accel_brake_chart.dart';
+import 'chart_frame.dart';
+import 'detail_app_bar.dart';
 import 'elevation_speed_chart.dart';
 import 'no_track_notice.dart';
 import 'place_route_label.dart';
 import 'rename_dialog.dart';
+import 'route_map_view.dart';
 import 'share_flow.dart';
+import 'smoothness_chart.dart';
 import 'speed_distance_chart.dart';
 import 'speed_zone_chart.dart';
-import 'tracking_map_screen.dart' show basemapUrl;
 
 /// Detail view for a saved ride: the recorded track replayed as a polyline on
 /// the map, with the full summary stats below.
@@ -44,6 +43,10 @@ class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
 
   /// True when this ride is a leg of a trip — only the wording changes.
   bool get _isLeg => widget.ride.tripId != null;
+
+  String get _title => _name?.trim().isNotEmpty == true
+      ? _name!.trim()
+      : (_isLeg ? 'Untitled leg' : 'Untitled ride');
 
   /// Renames this ride (or leg). Renaming a leg never touches its trip's name —
   /// the two are independent.
@@ -90,47 +93,18 @@ class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final cx = AppColors.of(context);
+    final unit = ref.watch(speedUnitProvider);
     final trackAsync = ref.watch(rideTrackProvider(widget.ride.id));
-    final title = _name?.trim().isNotEmpty == true
-        ? _name!.trim()
-        : (_isLeg ? 'Untitled leg' : 'Untitled ride');
 
     return Scaffold(
       backgroundColor: cx.canvas,
-      appBar: AppBar(
-        backgroundColor: cx.canvas,
-        foregroundColor: cx.textBright,
-        elevation: 0,
-        centerTitle: true,
-        shape: Border(bottom: BorderSide(color: cx.border)),
-        title: Text(title,
-            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-        actions: [
-          if (_sharing)
-            Padding(
-              padding: const EdgeInsets.only(right: 18),
-              child: Center(
-                child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2.2, color: cx.accentInk),
-                ),
-              ),
-            )
-          else ...[
-            IconButton(
-              icon: const Icon(Icons.edit_outlined),
-              tooltip: _isLeg ? 'Rename leg' : 'Rename ride',
-              onPressed: _rename,
-            ),
-            IconButton(
-              icon: const Icon(Icons.share),
-              tooltip: 'Share ride',
-              onPressed: trackAsync.hasValue ? _share : null,
-            ),
-          ],
-        ],
+      appBar: DetailAppBar(
+        title: _title,
+        onRename: _rename,
+        renameTooltip: _isLeg ? 'Rename leg' : 'Rename ride',
+        busy: _sharing,
+        onShare: trackAsync.hasValue ? _share : null,
+        shareTooltip: 'Share ride',
       ),
       body: Column(
         children: [
@@ -148,9 +122,10 @@ class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
                   style: TextStyle(color: cx.dangerInk),
                 ),
               ),
-              data: (points) => _RouteMap(
+              data: (points) => _ExpandableMap(
                 points: points,
-                unit: ref.watch(speedUnitProvider),
+                unit: unit,
+                title: _title,
               ),
             ),
           ),
@@ -158,17 +133,14 @@ class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
             child: SingleChildScrollView(
               child: Column(
                 children: [
-                  _SummaryPanel(
-                    ride: widget.ride,
-                    unit: ref.watch(speedUnitProvider),
-                  ),
-                  // Charts from the recorded track (needs at least two points),
-                  // shown as a horizontal swipe carousel.
+                  _SummaryPanel(ride: widget.ride, unit: unit),
+                  // Charts from the recorded track (needs at least two points).
                   if ((trackAsync.valueOrNull?.length ?? 0) >= 2)
-                    _ChartCarousel(
+                    _ChartTabs(
+                      rideId: widget.ride.id,
                       points: trackAsync.value!,
                       avgSpeedKmh: widget.ride.averageSpeedKmh,
-                      unit: ref.watch(speedUnitProvider),
+                      unit: unit,
                     ),
                 ],
               ),
@@ -180,207 +152,81 @@ class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
   }
 }
 
-/// The map with the recorded route + start/end markers. Falls back to a
-/// message when the ride has no recorded fixes.
-class _RouteMap extends StatelessWidget {
-  const _RouteMap({required this.points, required this.unit});
+/// The route map with a tap target over it that opens the fullscreen view (F30).
+///
+/// The hint chip is deliberate: a map that already pans and zooms gives no sign
+/// that tapping it does a *third* thing, so the affordance has to be said.
+class _ExpandableMap extends StatelessWidget {
+  const _ExpandableMap({
+    required this.points,
+    required this.unit,
+    required this.title,
+  });
 
   final List<TrackPoint> points;
   final SpeedUnit unit;
-
-  /// Number of quantized speed→color bands. Consecutive segments in the same
-  /// band merge into one polyline (run-length), so a steady cruise draws a few
-  /// polylines instead of one-per-fix while keeping the exact geometry.
-  static const int _bands = 26;
+  final String title;
 
   @override
   Widget build(BuildContext context) {
     final cx = AppColors.of(context);
-    final route = [for (final p in points) LatLng(p.latitude, p.longitude)];
-
-    if (route.isEmpty) {
-      return const NoTrackNotice(subject: 'ride');
-    }
-
-    final speeds = [for (final p in points) p.speedMps * 3.6]; // km/h
-    final maxSpeed = speeds.fold(0.0, (m, s) => s > m ? s : m);
-    final segments = _speedSegments(route, speeds, maxSpeed);
+    if (points.isEmpty) return const NoTrackNotice(subject: 'ride');
 
     return Stack(
       children: [
-        FlutterMap(
-          options: MapOptions(
-            backgroundColor: cx.canvas,
-            initialCenter: route.first,
-            initialZoom: 15,
-            // Fit the whole recorded route in view. A single-point ride keeps
-            // the initialCenter/zoom above (coordinates fit needs >= 2).
-            initialCameraFit: route.length >= 2
-                ? CameraFit.coordinates(
-                    coordinates: route,
-                    padding: const EdgeInsets.all(48),
-                    maxZoom: 17,
-                  )
-                : null,
-            interactionOptions: const InteractionOptions(
-              flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
-            ),
-          ),
-          children: [
-            TileLayer(
-              urlTemplate: basemapUrl(cx.isDark),
-              subdomains: const ['a', 'b', 'c', 'd'],
-              userAgentPackageName: 'id.co.opentrack.throttlepath',
-              tileProvider: NetworkTileProvider(silenceExceptions: true),
-            ),
-            if (segments.isNotEmpty) PolylineLayer(polylines: segments),
-            MarkerLayer(
-              markers: [
-                _endpointMarker(route.first, cx.accent), // start
-                if (route.length >= 2)
-                  _endpointMarker(route.last, cx.danger), // end
-              ],
-            ),
-          ],
-        ),
-        if (maxSpeed > 0)
-          Positioned(
-            left: 12,
-            bottom: 12,
-            child: _SpeedLegend(maxSpeedKmh: maxSpeed, unit: unit),
-          ),
-      ],
-    );
-  }
-
-  /// Builds one polyline per run of consecutive segments sharing a speed band,
-  /// colored via [SpeedPalette]. Each run reuses the previous run's boundary
-  /// vertex so the colored line stays continuous (no gaps at band changes).
-  List<Polyline> _speedSegments(
-    List<LatLng> route,
-    List<double> speeds,
-    double maxSpeed,
-  ) {
-    if (route.length < 2) return const [];
-    int bandOf(int seg) {
-      // Segment `seg` joins route[seg-1]→route[seg]; color by its mean speed.
-      final s = (speeds[seg - 1] + speeds[seg]) / 2;
-      final t = maxSpeed <= 0 ? 0.0 : (s / maxSpeed).clamp(0.0, 1.0);
-      return (t * (_bands - 1)).round();
-    }
-
-    final out = <Polyline>[];
-    var runStart = 1; // first segment index
-    var runBand = bandOf(1);
-    void flush(int endSeg) {
-      out.add(Polyline(
-        points: route.sublist(runStart - 1, endSeg + 1),
-        strokeWidth: 5,
-        color: SpeedPalette.at(runBand / (_bands - 1)),
-      ));
-    }
-
-    for (var seg = 2; seg < route.length; seg++) {
-      final band = bandOf(seg);
-      if (band != runBand) {
-        flush(seg - 1);
-        runStart = seg;
-        runBand = band;
-      }
-    }
-    flush(route.length - 1);
-    return out;
-  }
-
-  Marker _endpointMarker(LatLng point, Color color) => Marker(
-    point: point,
-    width: 20,
-    height: 20,
-    child: Container(
-      decoration: BoxDecoration(
-        color: color,
-        shape: BoxShape.circle,
-        border: Border.all(color: Colors.black, width: 3),
-        boxShadow: [
-          BoxShadow(
-            color: color.withValues(alpha: 0.6),
-            blurRadius: 10,
-            spreadRadius: 1,
-          ),
-        ],
-      ),
-    ),
-  );
-}
-
-/// Compact gradient scale explaining the speed-colored route: a Turbo bar from
-/// 0 to the ride's max speed, in the rider's chosen unit.
-class _SpeedLegend extends StatelessWidget {
-  const _SpeedLegend({required this.maxSpeedKmh, required this.unit});
-
-  final double maxSpeedKmh;
-  final SpeedUnit unit;
-
-  @override
-  Widget build(BuildContext context) {
-    final cx = AppColors.of(context);
-    final labelStyle = TextStyle(
-      color: cx.textBright,
-      fontSize: 12,
-      fontWeight: FontWeight.w600,
-      fontFeatures: kTabularFigures,
-    );
-    return Container(
-      padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
-      decoration: BoxDecoration(
-        color: cx.surface.withValues(alpha: 0.88),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: cx.border),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('SPEED',
-              style: TextStyle(
-                color: cx.textTertiary,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1,
-              )),
-          const SizedBox(height: 4),
-          Container(
-            width: 108,
-            height: 7,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(4),
-              gradient: LinearGradient(
-                colors: SpeedPalette.gradient,
-                stops: SpeedPalette.gradientStops,
+        Positioned.fill(child: RouteMapView(points: points, unit: unit)),
+        Positioned(
+          top: 12,
+          right: 12,
+          child: Semantics(
+            button: true,
+            label: 'Expand route map to full screen',
+            child: Material(
+              color: cx.surface.withValues(alpha: 0.92),
+              borderRadius: BorderRadius.circular(10),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: () => FullScreenRouteMap.open(
+                  context,
+                  points: points,
+                  unit: unit,
+                  title: title,
+                ),
+                child: Container(
+                  // 48dp tall so the a11y pass doesn't have to come back for it.
+                  constraints: const BoxConstraints(minHeight: 48),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: cx.border),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.open_in_full, size: 16, color: cx.accentInk),
+                      const SizedBox(width: 7),
+                      ExcludeSemantics(
+                        child: Text(
+                          'EXPAND',
+                          style: TextStyle(
+                            color: cx.textBright,
+                            fontSize: kMinFontSize,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.8,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
           ),
-          const SizedBox(height: 3),
-          SizedBox(
-            width: 108,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('0', style: labelStyle),
-                Text(
-                  '${unit.speed(maxSpeedKmh).toStringAsFixed(0)} '
-                  '${unit.speedLabel}',
-                  style: labelStyle,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
-
 
 /// Bottom stats panel — distance, elapsed vs moving time, avg/max speed.
 class _SummaryPanel extends StatelessWidget {
@@ -397,128 +243,125 @@ class _SummaryPanel extends StatelessWidget {
       color: cx.canvas,
       padding: const EdgeInsets.fromLTRB(22, 24, 22, 8),
       child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              _formatDate(ride.startTime),
-              style: TextStyle(color: cx.textDim, fontSize: 13),
-            ),
-            if (PlaceRouteLabel.label(ride.startPlace, ride.endPlace) !=
-                null) ...[
-              const SizedBox(height: 6),
-              PlaceRouteLabel(
-                startPlace: ride.startPlace,
-                endPlace: ride.endPlace,
-                fontSize: 14,
-              ),
-            ],
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _formatDate(ride.startTime),
+            style: TextStyle(color: cx.textDim, fontSize: 13),
+          ),
+          if (PlaceRouteLabel.label(ride.startPlace, ride.endPlace) != null) ...[
             const SizedBox(height: 6),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.baseline,
-              textBaseline: TextBaseline.alphabetic,
-              children: [
-                Text(
-                  unit
-                      .distanceMeters(ride.totalDistanceMeters)
-                      .toStringAsFixed(2),
-                  style: TextStyle(
-                    color: cx.textBright,
-                    fontSize: 44,
-                    height: 1,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: Text(
-                    unit.distanceLabel,
-                    style: TextStyle(color: cx.textDim, fontSize: 16),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 32),
-            Row(
-              children: [
-                _Stat(
-                  label: 'TOTAL TIME',
-                  value: _fmtDuration(ride.durationSeconds),
-                ),
-                _Stat(
-                  label: 'MOVING TIME',
-                  value: _fmtDuration(ride.movingSeconds),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-            Row(
-              children: [
-                _Stat(
-                  label: 'AVG SPEED',
-                  value: unit.speed(ride.averageSpeedKmh).toStringAsFixed(1),
-                  unit: unit.speedLabel,
-                ),
-                _Stat(
-                  label: 'PEAK SPEED',
-                  value: unit.speed(ride.maxSpeedKmh).toStringAsFixed(1),
-                  unit: unit.speedLabel,
-                  color: cx.peak,
-                ),
-              ],
+            PlaceRouteLabel(
+              startPlace: ride.startPlace,
+              endPlace: ride.endPlace,
+              fontSize: 14,
             ),
           ],
-        ),
+          const SizedBox(height: 6),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(
+                unit
+                    .distanceMeters(ride.totalDistanceMeters)
+                    .toStringAsFixed(2),
+                style: TextStyle(
+                  color: cx.textBright,
+                  fontSize: 44,
+                  height: 1,
+                  fontWeight: FontWeight.w800,
+                  fontFeatures: kTabularFigures,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text(
+                  unit.distanceLabel,
+                  style: TextStyle(color: cx.textDim, fontSize: 16),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 32),
+          Row(
+            children: [
+              _Stat(
+                label: 'TOTAL TIME',
+                value: _fmtDuration(ride.durationSeconds),
+              ),
+              _Stat(
+                label: 'MOVING TIME',
+                value: _fmtDuration(ride.movingSeconds),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              _Stat(
+                label: 'AVG SPEED',
+                value: unit.speed(ride.averageSpeedKmh).toStringAsFixed(1),
+                unit: unit.speedLabel,
+              ),
+              _Stat(
+                label: 'PEAK SPEED',
+                value: unit.speed(ride.maxSpeedKmh).toStringAsFixed(1),
+                unit: unit.speedLabel,
+                color: cx.peak,
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
 
-/// Horizontal swipe carousel over the ride's charts: speed-vs-distance, speed
-/// zones, acceleration/braking, and (when the track carries altitude) the
-/// elevation-vs-speed profile. The pager resizes to the current page's actual
-/// content height (each page is measured off its natural size) so the dots hug
-/// the chart instead of floating below a fixed gap. The [PageView] only claims
-/// horizontal drags and inner pages never scroll, so vertical scrolling passes
-/// through to the surrounding scroll view. Page-indicator dots sit below.
-class _ChartCarousel extends StatefulWidget {
-  const _ChartCarousel({
+/// The ride's charts behind a **labelled** tab bar.
+///
+/// Replaces a `PageView` under four 4px dots (F25). The dots said how many
+/// charts existed and nothing about what they held, so finding the elevation
+/// profile meant swiping through everything else to see what turned up — and the
+/// pager gave no way back except swiping again. Tabs name the destinations and
+/// let the rider jump straight to one.
+///
+/// The pager still resizes to the active tab's measured content height: the tabs
+/// hold genuinely different amounts (a stacked bar and a table vs. a scatter), so
+/// a fixed height would either clip the tallest or strand the shortest under a
+/// screen of empty canvas.
+class _ChartTabs extends StatefulWidget {
+  const _ChartTabs({
+    required this.rideId,
     required this.points,
     required this.avgSpeedKmh,
     required this.unit,
   });
 
+  final int rideId;
   final List<TrackPoint> points;
   final double avgSpeedKmh;
   final SpeedUnit unit;
 
-  /// Height used until a page has been measured (first frame / far pages).
-  static const double _fallbackHeight = 420;
+  /// Height used until a tab has been measured (first frame / unvisited tabs).
+  static const double _fallbackHeight = 460;
 
   @override
-  State<_ChartCarousel> createState() => _ChartCarouselState();
+  State<_ChartTabs> createState() => _ChartTabsState();
 }
 
-class _ChartCarouselState extends State<_ChartCarousel> {
-  final _controller = PageController();
-  int _page = 0;
+class _ChartTabsState extends State<_ChartTabs>
+    with SingleTickerProviderStateMixin {
+  TabController? _controller;
+  int _index = 0;
 
-  /// Measured natural content height per page index.
+  /// Measured natural content height per tab index.
   final _heights = <int, double>{};
 
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _setHeight(int index, double height) {
-    if (_heights[index] == height) return;
-    setState(() => _heights[index] = height);
-  }
-
-  /// Mirrors [ElevationSpeedChart]'s own guard so the elevation page is only
-  /// added when it would actually render (>= 2 altitude fixes, >= 2 m of swing).
+  /// Mirrors [ElevationSpeedChart]'s own guard so the elevation tab is only
+  /// offered when it would actually render (>= 2 altitude fixes, >= 2 m swing).
   bool get _hasElevation {
     var count = 0;
     double? mn, mx;
@@ -529,66 +372,138 @@ class _ChartCarouselState extends State<_ChartCarousel> {
       mn = mn == null ? a : (a < mn ? a : mn);
       mx = mx == null ? a : (a > mx ? a : mx);
     }
-    return count >= 2 && mn != null && mx != null && (mx - mn) >= 2.0;
+    return count >= 2 &&
+        mn != null &&
+        mx != null &&
+        (mx - mn) >= ElevationSpeedChart.minElevRange;
+  }
+
+  List<String> get _labels => [
+        'Speed',
+        'Zones',
+        'Smoothness',
+        if (_hasElevation) 'Elevation',
+      ];
+
+  @override
+  void initState() {
+    super.initState();
+    _syncController();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ChartTabs old) {
+    super.didUpdateWidget(old);
+    _syncController();
+  }
+
+  /// (Re)builds the controller when the tab count changes — the elevation tab
+  /// appears or disappears with the track, and a `TabController` whose length no
+  /// longer matches its `TabBar` throws.
+  void _syncController() {
+    final length = _labels.length;
+    if (_controller?.length == length) return;
+    _controller?.removeListener(_onTab);
+    _controller?.dispose();
+    _controller = TabController(
+      length: length,
+      vsync: this,
+      initialIndex: _index.clamp(0, length - 1),
+    )..addListener(_onTab);
+  }
+
+  void _onTab() {
+    final c = _controller;
+    if (c == null || c.index == _index) return;
+    setState(() => _index = c.index);
+  }
+
+  @override
+  void dispose() {
+    _controller?.removeListener(_onTab);
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  void _setHeight(int index, double height) {
+    if (_heights[index] == height) return;
+    // Measurement lands in a post-frame callback, which can fire after the tab
+    // count shrank this widget out from under it.
+    if (!mounted) return;
+    setState(() => _heights[index] = height);
   }
 
   @override
   Widget build(BuildContext context) {
     final cx = AppColors.of(context);
+    final controller = _controller!;
     final pages = <Widget>[
-      _RideChart(
+      _SpeedChartTab(
         points: widget.points,
         avgSpeedKmh: widget.avgSpeedKmh,
         unit: widget.unit,
       ),
       SpeedZoneChart(points: widget.points, unit: widget.unit),
-      AccelBrakeChart(points: widget.points),
+      SmoothnessChart(
+        rideId: widget.rideId,
+        points: widget.points,
+        unit: widget.unit,
+      ),
       if (_hasElevation)
         ElevationSpeedChart(points: widget.points, unit: widget.unit),
     ];
 
-    // Guard against the current page falling out of range (e.g. elevation page
-    // disappearing) after a rebuild.
-    final page = _page.clamp(0, pages.length - 1);
-    final height = _heights[page] ?? _ChartCarousel._fallbackHeight;
+    final index = _index.clamp(0, pages.length - 1);
+    final height = _heights[index] ?? _ChartTabs._fallbackHeight;
 
     return Column(
       children: [
+        Container(
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(color: cx.border),
+              top: BorderSide(color: cx.border),
+            ),
+          ),
+          child: TabBar(
+            controller: controller,
+            // Scrollable so four labels never compress into truncated stubs on a
+            // 353dp screen, and so a fifth chart later doesn't force a redesign.
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
+            indicatorColor: cx.accentInk,
+            indicatorWeight: 2.5,
+            indicatorSize: TabBarIndicatorSize.label,
+            dividerColor: Colors.transparent,
+            labelColor: cx.textBright,
+            unselectedLabelColor: cx.textDim,
+            labelStyle: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+            unselectedLabelStyle: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+            ),
+            tabs: [for (final l in _labels) Tab(height: 46, text: l)],
+          ),
+        ),
         AnimatedContainer(
           duration: const Duration(milliseconds: 220),
           curve: Curves.easeOutCubic,
           height: height,
-          child: PageView(
-            controller: _controller,
-            onPageChanged: (i) => setState(() => _page = i),
+          child: TabBarView(
+            controller: controller,
             children: [
               for (var i = 0; i < pages.length; i++)
                 // Never-scrolling viewport: lets the child take its natural
-                // height (for measurement) without stealing vertical drags.
+                // height (for measurement) without stealing vertical drags from
+                // the page behind it.
                 SingleChildScrollView(
                   physics: const NeverScrollableScrollPhysics(),
                   child: _MeasureSize(
                     onChange: (size) => _setHeight(i, size.height),
                     child: pages[i],
-                  ),
-                ),
-            ],
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.only(top: 6, bottom: 18),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              for (var i = 0; i < pages.length; i++)
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  margin: const EdgeInsets.symmetric(horizontal: 4),
-                  width: i == page ? 22 : 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: i == page ? cx.accent : cx.border,
-                    borderRadius: BorderRadius.circular(4),
                   ),
                 ),
             ],
@@ -600,7 +515,7 @@ class _ChartCarouselState extends State<_ChartCarousel> {
 }
 
 /// Reports its child's laid-out size via [onChange] after each frame it changes.
-/// Used to size the chart pager to the active page's real content height.
+/// Used to size the chart pager to the active tab's real content height.
 class _MeasureSize extends SingleChildRenderObjectWidget {
   const _MeasureSize({required this.onChange, required super.child});
 
@@ -629,16 +544,15 @@ class _MeasureSizeRenderObject extends RenderProxyBox {
     final size = child?.size ?? Size.zero;
     if (size != _old) {
       _old = size;
-      WidgetsBinding.instance
-          .addPostFrameCallback((_) => onChange(size));
+      WidgetsBinding.instance.addPostFrameCallback((_) => onChange(size));
     }
   }
 }
 
-/// Speed-vs-distance chart for a saved ride, built from its recorded track
-/// points: cumulative Haversine distance on x, per-fix ground speed on y.
-class _RideChart extends StatelessWidget {
-  const _RideChart({
+/// Speed-vs-distance for a saved ride: cumulative Haversine distance on x,
+/// per-fix ground speed on y, under the shared title + takeaway.
+class _SpeedChartTab extends StatelessWidget {
+  const _SpeedChartTab({
     required this.points,
     required this.avgSpeedKmh,
     required this.unit,
@@ -650,9 +564,10 @@ class _RideChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cx = AppColors.of(context);
     final spots = <FlSpot>[];
     var distMeters = 0.0;
+    var peakKmh = 0.0;
+    var peakAtKm = 0.0;
     for (var i = 0; i < points.length; i++) {
       if (i > 0) {
         distMeters += haversineMeters(
@@ -662,25 +577,38 @@ class _RideChart extends StatelessWidget {
           points[i].longitude,
         );
       }
-      spots.add(FlSpot(distMeters / 1000.0, points[i].speedMps * 3.6));
+      final kmh = points[i].speedMps * 3.6;
+      if (kmh > peakKmh) {
+        peakKmh = kmh;
+        peakAtKm = distMeters / 1000.0;
+      }
+      spots.add(FlSpot(distMeters / 1000.0, kmh));
     }
 
-    return Container(
-      width: double.infinity,
-      color: cx.canvas,
-      child: SafeArea(
-        top: false,
-        child: SizedBox(
-          height: 260,
-          child: SpeedDistanceChart(
-            spots: spots,
-            avgSpeedKmh: avgSpeedKmh,
-            unit: unit,
-            interactive: true,
-          ),
+    return ChartFrame(
+      title: 'SPEED OVER DISTANCE',
+      takeaway: _takeaway(peakKmh, peakAtKm),
+      child: SizedBox(
+        height: 260,
+        child: SpeedDistanceChart(
+          spots: spots,
+          avgSpeedKmh: avgSpeedKmh,
+          unit: unit,
+          interactive: true,
         ),
       ),
     );
+  }
+
+  String _takeaway(double peakKmh, double peakAtKm) {
+    final peak = unit.speed(peakKmh).toStringAsFixed(0);
+    final avg = unit.speed(avgSpeedKmh).toStringAsFixed(0);
+    final at = unit.distanceKm(peakAtKm).toStringAsFixed(1);
+    if (peakKmh <= 0) {
+      return 'No usable speed readings were recorded on this ride.';
+    }
+    return 'Peaked at $peak ${unit.speedLabel} about $at '
+        '${unit.distanceLabel} in, against a $avg ${unit.speedLabel} average.';
   }
 }
 
@@ -706,7 +634,7 @@ class _Stat extends StatelessWidget {
         children: [
           Text(
             label,
-            style: TextStyle(color: cx.textTertiary, fontSize: 12),
+            style: TextStyle(color: cx.textTertiary, fontSize: kMinFontSize),
           ),
           const SizedBox(height: 6),
           Row(
@@ -726,7 +654,8 @@ class _Stat extends StatelessWidget {
                 const SizedBox(width: 4),
                 Text(
                   unit,
-                  style: TextStyle(color: cx.textDim, fontSize: 12),
+                  style:
+                      TextStyle(color: cx.textDim, fontSize: kMinFontSize),
                 ),
               ],
             ],
