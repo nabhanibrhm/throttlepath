@@ -70,26 +70,17 @@ class LeanBackdrop extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   LeanGauge(
-                    value: lean ?? 0,
+                    value: lean,
                     caption: 'LIVE LEAN',
+                    // Max-hold comes from the controller, not from this widget:
+                    // cycling the record view rebuilds the backdrop from scratch.
+                    maxLeftDegrees: state.leanMaxLeftDegrees,
+                    maxRightDegrees: state.leanMaxRightDegrees,
                     live: true,
                     dimmed: lean == null,
                     maxWidth: 240,
                   ),
                   const SizedBox(height: 18),
-                  // Which way, in words — the dial reads magnitude only, and a
-                  // signed numeral would leave the rider decoding a minus sign.
-                  if (lean != null)
-                    Text(
-                      lean < 0 ? 'LEANING LEFT' : 'LEANING RIGHT',
-                      style: TextStyle(
-                        color: cx.accentInk,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 1.0,
-                      ),
-                    ),
-                  const SizedBox(height: 10),
                   Text(
                     note,
                     textAlign: TextAlign.center,

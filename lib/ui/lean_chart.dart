@@ -80,6 +80,11 @@ class LeanChart extends StatelessWidget {
     final xInterval = niceInterval(maxDistance, 4);
     final peak = a.peakDegrees;
     final peakAt = a.peakAtDistanceMeters;
+    // [LeanAnalysis.peakDegrees] is a magnitude, but the dial is centre-zero and
+    // points the way the bike leaned — so recover the side from the sample the
+    // peak was attributed to. Same instant by construction: peakAtSeconds *is*
+    // that sample's tSec.
+    final signedPeak = peak == null ? null : _peakSigned(a, peak);
 
     return ChartFrame(
       title: 'LEAN',
@@ -100,7 +105,7 @@ class LeanChart extends StatelessWidget {
               ),
               child: Center(
                 child: LeanGauge(
-                  value: peak,
+                  value: signedPeak,
                   caption: 'PEAK LEAN THIS RIDE',
                 ),
               ),
@@ -304,7 +309,8 @@ class LeanChart extends StatelessWidget {
   }
 
   /// Puts [peak] (a magnitude) back on the side the apex actually happened, so the
-  /// marker lands on the drawn curve rather than mirrored across the axis.
+  /// marker lands on the drawn curve rather than mirrored across the axis — and so
+  /// the centre-zero dial points the way the bike leaned instead of always right.
   static double _peakSigned(LeanAnalysis a, double peak) {
     final at = a.peakAtSeconds;
     if (at == null) return peak;

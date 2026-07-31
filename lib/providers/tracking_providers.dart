@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
@@ -33,6 +34,8 @@ class TrackingUiState {
     this.telemetry,
     this.route = const [],
     this.speedSamples = const [],
+    this.leanMaxLeftDegrees = 0,
+    this.leanMaxRightDegrees = 0,
     this.lastFinished,
     this.continuingTripId,
     this.continuingTripName,
@@ -53,6 +56,16 @@ class TrackingUiState {
 
   /// Per-fix (distance, speed) samples for the live chart, in capture order.
   final List<SpeedSample> speedSamples;
+
+  /// Furthest lean reached each way this ride, as magnitudes in degrees, for the
+  /// lean dial's max-hold marks. Zero until the first estimate arrives.
+  ///
+  /// Accumulated here rather than in the gauge because the Record screen builds a
+  /// *different* backdrop widget per view, so cycling map → chart → lean destroys
+  /// and recreates the dial. A max-hold that forgot the ride's peak on a view
+  /// toggle would be worse than not having one.
+  final double leanMaxLeftDegrees;
+  final double leanMaxRightDegrees;
   final LiveTelemetry? lastFinished;
 
   /// When non-null, the next recording is a continuation of this open trip (its
@@ -70,6 +83,8 @@ class TrackingUiState {
     LiveTelemetry? telemetry,
     List<LatLng>? route,
     List<SpeedSample>? speedSamples,
+    double? leanMaxLeftDegrees,
+    double? leanMaxRightDegrees,
     LiveTelemetry? lastFinished,
     int? continuingTripId,
     String? continuingTripName,
@@ -87,6 +102,8 @@ class TrackingUiState {
       telemetry: clearTelemetry ? null : (telemetry ?? this.telemetry),
       route: route ?? this.route,
       speedSamples: speedSamples ?? this.speedSamples,
+      leanMaxLeftDegrees: leanMaxLeftDegrees ?? this.leanMaxLeftDegrees,
+      leanMaxRightDegrees: leanMaxRightDegrees ?? this.leanMaxRightDegrees,
       lastFinished: clearFinished ? null : (lastFinished ?? this.lastFinished),
       continuingTripId:
           clearContinuation ? null : (continuingTripId ?? this.continuingTripId),
@@ -114,6 +131,7 @@ class TrackingController extends StateNotifier<TrackingUiState> {
 
   void _onTelemetry(LiveTelemetry t) {
     final track = _extendTrack(t);
+    final leanMax = _extendLeanMax(t);
     state = state.copyWith(
       isTracking: true,
       isPaused: t.paused,
@@ -122,6 +140,26 @@ class TrackingController extends StateNotifier<TrackingUiState> {
       telemetry: t,
       route: track.route,
       speedSamples: track.samples,
+      leanMaxLeftDegrees: leanMax.left,
+      leanMaxRightDegrees: leanMax.right,
+    );
+  }
+
+  /// The per-side lean maxima after folding in [t], unchanged when it carries no
+  /// estimate. Only counts while recording, so a corner taken during acquisition
+  /// or a countdown cannot seed a peak the ride never had.
+  ({double left, double right}) _extendLeanMax(LiveTelemetry t) {
+    final lean = t.leanDegrees;
+    if (lean == null || t.phase != 'recording') {
+      return (left: state.leanMaxLeftDegrees, right: state.leanMaxRightDegrees);
+    }
+    return (
+      left: lean < 0
+          ? math.max(state.leanMaxLeftDegrees, -lean)
+          : state.leanMaxLeftDegrees,
+      right: lean > 0
+          ? math.max(state.leanMaxRightDegrees, lean)
+          : state.leanMaxRightDegrees,
     );
   }
 
@@ -168,6 +206,8 @@ class TrackingController extends StateNotifier<TrackingUiState> {
       countdown: 0,
       route: const [],
       speedSamples: const [],
+      leanMaxLeftDegrees: 0,
+      leanMaxRightDegrees: 0,
       clearTelemetry: true,
       error: reason,
     );
@@ -188,6 +228,8 @@ class TrackingController extends StateNotifier<TrackingUiState> {
       countdown: 0,
       route: const [],
       speedSamples: const [],
+      leanMaxLeftDegrees: 0,
+      leanMaxRightDegrees: 0,
       clearTelemetry: true,
       clearFinished: true,
       clearError: true,
@@ -355,6 +397,8 @@ class TrackingController extends StateNotifier<TrackingUiState> {
       countdown: 0,
       route: const [],
       speedSamples: const [],
+      leanMaxLeftDegrees: 0,
+      leanMaxRightDegrees: 0,
       clearTelemetry: true,
       clearFinished: true,
       clearContinuation: clearContinuation,
