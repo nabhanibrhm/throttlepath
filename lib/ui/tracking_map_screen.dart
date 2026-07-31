@@ -74,6 +74,20 @@ class _TrackingMapScreenState extends ConsumerState<TrackingMapScreen> {
   final GlobalKey _sheetKey = GlobalKey();
   double _sheetHeight = 0;
 
+  /// The trip banner's measured height, or 0 when no banner is up.
+  ///
+  /// The banner is a translucent overlay, which is the right treatment over the
+  /// *map* — it is spatial, it continues underneath, and a rider can pan out from
+  /// behind it. Over a chart it is not: the top of the plot is where the ride's
+  /// peak speed sits, so occluding it hides the one value the axis exists to show.
+  /// So the non-map backdrops reserve this strip the same way they already reserve
+  /// [_sheetHeight] at the bottom.
+  ///
+  /// Measured below the banner's own `SafeArea`, because the backdrops sit inside
+  /// theirs — taking the status bar into this number would count it twice.
+  final GlobalKey _bannerKey = GlobalKey();
+  double _bannerHeight = 0;
+
   /// Where to put the rider so they land in the middle of the *visible* map.
   ///
   /// The map is full-bleed but the telemetry sheet covers its bottom ~40%, so
@@ -102,6 +116,18 @@ class _TrackingMapScreenState extends ConsumerState<TrackingMapScreen> {
       final target = _currentLatLng(ref.read(trackingControllerProvider));
       if (target != null) _moveCamera(target, _mapController.camera.zoom);
     }
+  }
+
+  /// Reads the trip banner's laid-out height, falling back to 0 once it is gone.
+  ///
+  /// Same no-loop argument as [_measureSheet]: the banner sizes itself from the
+  /// trip's name, never from this value, so the next measurement matches and the
+  /// `!=` guard stops there.
+  void _measureBanner() {
+    final box = _bannerKey.currentContext?.findRenderObject() as RenderBox?;
+    final height = box != null && box.hasSize ? box.size.height : 0.0;
+    if (height == _bannerHeight || !mounted) return;
+    setState(() => _bannerHeight = height);
   }
 
   /// Centres the camera on [target] in the visible strip above the sheet.
@@ -209,7 +235,10 @@ class _TrackingMapScreenState extends ConsumerState<TrackingMapScreen> {
     // The sheet grows and shrinks with the ride phase (idle context vs. the
     // 4-up grid, one button vs. two), so its height is remeasured every frame
     // rather than assumed once.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _measureSheet());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _measureSheet();
+      _measureBanner();
+    });
 
     return Scaffold(
       backgroundColor: cx.canvas,
@@ -221,6 +250,7 @@ class _TrackingMapScreenState extends ConsumerState<TrackingMapScreen> {
           // recording will join, with a cancel to detach and ride standalone.
           if (state.continuingTripId != null)
             _ContinuingTripBanner(
+              measureKey: _bannerKey,
               tripName: state.continuingTripName,
               onCancel: () => ref
                   .read(trackingControllerProvider.notifier)
@@ -232,6 +262,7 @@ class _TrackingMapScreenState extends ConsumerState<TrackingMapScreen> {
               state.phase == 'idle' &&
               !dismissedNudges.contains(nearby.trip.id))
             _NearbyTripBanner(
+              measureKey: _bannerKey,
               tripName: nearby.trip.name,
               onContinue: () => ref
                   .read(trackingControllerProvider.notifier)
@@ -303,14 +334,23 @@ class _TrackingMapScreenState extends ConsumerState<TrackingMapScreen> {
           child: ChartBackdrop(
             state: state,
             unit: unit,
+            topInset: _bannerHeight,
             bottomInset: _sheetHeight,
           ),
         ),
       RecordView.lean => Positioned.fill(
-          child: LeanBackdrop(state: state, bottomInset: _sheetHeight),
+          child: LeanBackdrop(
+            state: state,
+            topInset: _bannerHeight,
+            bottomInset: _sheetHeight,
+          ),
         ),
       RecordView.none => Positioned.fill(
-          child: StatsBackdrop(state: state, bottomInset: _sheetHeight),
+          child: StatsBackdrop(
+            state: state,
+            topInset: _bannerHeight,
+            bottomInset: _sheetHeight,
+          ),
         ),
     };
   }
@@ -467,8 +507,15 @@ class _MapAttribution extends StatelessWidget {
 /// Top banner shown while a trip continuation is pending — names the trip the
 /// next recording will join and offers a cancel (ride standalone instead).
 class _ContinuingTripBanner extends StatelessWidget {
-  const _ContinuingTripBanner({required this.tripName, required this.onCancel});
+  const _ContinuingTripBanner({
+    required this.measureKey,
+    required this.tripName,
+    required this.onCancel,
+  });
 
+  /// Attached below the `SafeArea` so the measured height is the banner itself —
+  /// see `_TrackingMapScreenState._bannerHeight`.
+  final GlobalKey measureKey;
   final String? tripName;
   final VoidCallback onCancel;
 
@@ -482,6 +529,7 @@ class _ContinuingTripBanner extends StatelessWidget {
       right: 0,
       child: SafeArea(
         child: Padding(
+          key: measureKey,
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(14),
@@ -553,11 +601,14 @@ class _ContinuingTripBanner extends StatelessWidget {
 /// idle when the current position is close to where an open trip last ended.
 class _NearbyTripBanner extends StatelessWidget {
   const _NearbyTripBanner({
+    required this.measureKey,
     required this.tripName,
     required this.onContinue,
     required this.onDismiss,
   });
 
+  /// See [_ContinuingTripBanner.measureKey].
+  final GlobalKey measureKey;
   final String? tripName;
   final VoidCallback onContinue;
   final VoidCallback onDismiss;
@@ -572,6 +623,7 @@ class _NearbyTripBanner extends StatelessWidget {
       right: 0,
       child: SafeArea(
         child: Padding(
+          key: measureKey,
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(14),

@@ -33,12 +33,20 @@ import 'live_speed_chart.dart';
 /// parking the needle at zero as though it had measured zero.
 class LeanBackdrop extends StatelessWidget {
   const LeanBackdrop({
-    super.key,required this.state, required this.bottomInset});
+    super.key,
+    required this.state,
+    required this.bottomInset,
+    this.topInset = 0,
+  });
 
   final TrackingUiState state;
 
   /// Measured height of the telemetry sheet covering the bottom of the stack.
   final double bottomInset;
+
+  /// Measured height of the trip banner overlaying the top — see
+  /// [ChartBackdrop.topInset].
+  final double topInset;
 
   @override
   Widget build(BuildContext context) {
@@ -62,7 +70,7 @@ class LeanBackdrop extends StatelessWidget {
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: EdgeInsets.only(bottom: bottomInset),
+          padding: EdgeInsets.only(top: topInset, bottom: bottomInset),
           child: Center(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 28),
@@ -110,6 +118,7 @@ class ChartBackdrop extends StatelessWidget {
     required this.state,
     required this.unit,
     required this.bottomInset,
+    this.topInset = 0,
   });
 
   final TrackingUiState state;
@@ -123,6 +132,14 @@ class ChartBackdrop extends StatelessWidget {
   /// the same grid: it fills exactly the strip that is on screen.
   final double bottomInset;
 
+  /// Measured height of the trip banner overlaying the top, 0 when there is none.
+  ///
+  /// The same lesson as [bottomInset], learned at the other end: the banner is a
+  /// translucent overlay, so it was drawing straight over the top of the plot —
+  /// which on a speed chart is where the *peak* is, clipping the highest y-axis
+  /// label. Reserving its height keeps the whole plot on screen.
+  final double topInset;
+
   @override
   Widget build(BuildContext context) {
     final cx = AppColors.of(context);
@@ -135,7 +152,7 @@ class ChartBackdrop extends StatelessWidget {
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: EdgeInsets.only(bottom: bottomInset),
+          padding: EdgeInsets.only(top: topInset, bottom: bottomInset),
           child: samples.length < 2
               ? _EmptyChart(recording: state.phase == 'recording')
               : Padding(
@@ -207,12 +224,19 @@ class _EmptyChart extends StatelessWidget {
 /// it shows in every backdrop rather than only this one.
 class StatsBackdrop extends StatelessWidget {
   const StatsBackdrop({
-    super.key,required this.state, required this.bottomInset});
+    super.key,
+    required this.state,
+    required this.bottomInset,
+    this.topInset = 0,
+  });
 
   final TrackingUiState state;
 
   /// Measured height of the telemetry sheet — see [ChartBackdrop.bottomInset].
   final double bottomInset;
+
+  /// Measured height of the trip banner — see [ChartBackdrop.topInset].
+  final double topInset;
 
   @override
   Widget build(BuildContext context) {
@@ -223,7 +247,7 @@ class StatsBackdrop extends StatelessWidget {
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: EdgeInsets.only(bottom: bottomInset),
+          padding: EdgeInsets.only(top: topInset, bottom: bottomInset),
           child: Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
