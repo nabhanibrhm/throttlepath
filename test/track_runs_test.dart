@@ -1,0 +1,162 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:throttlepath/core/track_runs.dart';
+
+/// A fix, as the module wants it.
+typedef Fix = ({DateTime time, double lat, double lon});
+
+Fix fixOf(Fix f) => f;
+
+final _epoch = DateTime.utc(2026, 7, 31, 17, 0);
+
+/// [count] fixes one second apart starting at [atSecond], walking north from
+/// ([lat], [lon]) at roughly 20 km/h.
+List<Fix> leg(int atSecond, int count, double lat, double lon) => [
+      for (var i = 0; i < count; i++)
+        (
+          time: _epoch.add(Duration(seconds: atSecond + i)),
+          lat: lat + i * 0.00005,
+          lon: lon,
+        ),
+    ];
+
+void main() {
+  // The real ride area and the stale-ephemeris excursion from ride 44
+  // ("Friday Trip" stint 2) — 17.9 km apart.
+  const homeLat = -6.20027, homeLon = 106.82248;
+  const driftLat = -6.25415, driftLon = 106.96199;
+
+  group('splitIntoRuns', () {
+    test('leaves a healthy track whole', () {
+      final runs = splitIntoRuns(leg(0, 60, homeLat, homeLon), fixOf: fixOf);
+      expect(runs, hasLength(1));
+      expect(runs.single, hasLength(60));
+    });
+
+    test('cuts at the blackout threshold but not below it', () {
+      final justUnder = [
+        ...leg(0, 5, homeLat, homeLon),
+        ...leg(4 + kSignalLossSeconds - 1, 5, homeLat, homeLon),
+      ];
+      expect(splitIntoRuns(justUnder, fixOf: fixOf), hasLength(1));
+
+      final atThreshold = [
+        ...leg(0, 5, homeLat, homeLon),
+        ...leg(4 + kSignalLossSeconds, 5, homeLat, homeLon),
+      ];
+      expect(splitIntoRuns(atThreshold, fixOf: fixOf), hasLength(2));
+    });
+
+    test('handles an empty and a single-fix track', () {
+      expect(splitIntoRuns(<Fix>[], fixOf: fixOf), isEmpty);
+      expect(splitIntoRuns(leg(0, 1, homeLat, homeLon), fixOf: fixOf),
+          hasLength(1));
+    });
+  });
+
+  group('segmentTrack', () {
+    test('drops a bracketed excursion and keeps the ride', () {
+      // The shape of stint 2: ride, 20-minute blackout, a coherent excursion
+      // 17.9 km away, then back where we left off.
+      final track = [
+        ...leg(0, 300, homeLat, homeLon),
+        ...leg(1500, 49, driftLat, driftLon),
+        ...leg(1600, 60, homeLat, homeLon),
+      ];
+
+      final seg = segmentTrack(track, fixOf: fixOf);
+
+      expect(seg.runs, hasLength(2), reason: 'excursion removed, gap remains');
+      expect(seg.discardedCount, 49);
+      expect(seg.points, hasLength(360));
+      expect(seg.hasBreaks, isTrue);
+      expect(seg.breakIndices, [300]);
+      for (final p in seg.points) {
+        expect(p.lat, closeTo(homeLat, 0.05));
+      }
+    });
+
+    test('keeps a displacement the ride never returns from', () {
+      // A long tunnel: the rider comes out kilometres away and carries on. The
+      // tail is not bracketed, so amputating it would delete real riding.
+      final track = [
+        ...leg(0, 300, homeLat, homeLon),
+        ...leg(1500, 49, driftLat, driftLon),
+      ];
+
+      final seg = segmentTrack(track, fixOf: fixOf);
+
+      expect(seg.discardedCount, 0);
+      expect(seg.runs, hasLength(2));
+      expect(seg.points, hasLength(349));
+    });
+
+    test('keeps a bracketed excursion too large to be an artefact', () {
+      // Same bracketing, but the "excursion" holds most of the recorded time —
+      // at that point it is the ride, whatever the coordinates say.
+      final track = [
+        ...leg(0, 30, homeLat, homeLon),
+        ...leg(100, 600, driftLat, driftLon),
+        ...leg(800, 30, homeLat, homeLon),
+      ];
+
+      final seg = segmentTrack(track, fixOf: fixOf);
+
+      expect(seg.discardedCount, 0);
+      expect(seg.runs, hasLength(3));
+    });
+
+    test('never splits or drops on ordinary scatter', () {
+      // A gap, but the track resumes 40 m away — a parked rider, not a fault.
+      final track = [
+        ...leg(0, 120, homeLat, homeLon),
+        ...leg(600, 120, homeLat + 0.00036, homeLon),
+        ...leg(900, 120, homeLat, homeLon),
+      ];
+
+      final seg = segmentTrack(track, fixOf: fixOf);
+
+      expect(seg.discardedCount, 0);
+      expect(seg.runs, hasLength(3), reason: 'gaps still break the polyline');
+      expect(seg.points, hasLength(360));
+    });
+
+    test('an unbroken track is returned untouched', () {
+      final track = leg(0, 200, homeLat, homeLon);
+      final seg = segmentTrack(track, fixOf: fixOf);
+      expect(seg.runs, hasLength(1));
+      expect(seg.hasBreaks, isFalse);
+      expect(seg.breakIndices, isEmpty);
+      expect(seg.discardedCount, 0);
+    });
+  });
+
+  group('cumulativeMeters', () {
+    test('does not advance across a gap', () {
+      final track = [
+        ...leg(0, 3, homeLat, homeLon),
+        // Resumes 400 m north after a 20-minute blackout.
+        ...leg(1200, 3, homeLat + 0.0036, homeLon),
+      ];
+
+      final cumulative = cumulativeMeters(track, fixOf: fixOf);
+
+      expect(cumulative.first, 0);
+      // Two 5.5 m steps within the first run.
+      expect(cumulative[2], closeTo(11.1, 1.0));
+      // The 400 m jump contributes nothing.
+      expect(cumulative[3], closeTo(cumulative[2], 0.01));
+      expect(cumulative.last, closeTo(cumulative[2] + 11.1, 1.0));
+    });
+
+    test('matches plain accumulation on a healthy track', () {
+      final track = leg(0, 100, homeLat, homeLon);
+      final cumulative = cumulativeMeters(track, fixOf: fixOf);
+      expect(cumulative.last, closeTo(99 * 5.55, 5));
+    });
+
+    test('is zero-length-safe', () {
+      expect(cumulativeMeters(<Fix>[], fixOf: fixOf), isEmpty);
+      expect(cumulativeMeters(leg(0, 1, homeLat, homeLon), fixOf: fixOf), [0.0]);
+    });
+  });
+}

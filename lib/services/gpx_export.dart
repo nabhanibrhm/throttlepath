@@ -1,3 +1,4 @@
+import '../core/track_runs.dart';
 import '../data/models/ride.dart';
 import '../data/models/track_point.dart';
 import 'share_channel.dart';
@@ -32,6 +33,11 @@ class GpxExport {
   /// mean in GPX — a break in recording, not a break in the journey. A
   /// single-ride export passes an empty list and gets one segment.
   ///
+  /// GPS blackouts *within* a stint break the segment for the same reason, and
+  /// are detected here rather than asked of the caller: a reader that joins
+  /// trackpoints across a dead zone re-derives the phantom distance this app
+  /// spent three guards refusing to count.
+  ///
   /// Pure string building, so it is unit-testable without a device.
   static String buildGpx({
     required Ride ride,
@@ -55,7 +61,7 @@ class GpxExport {
 
     // Segment boundaries, deduplicated and in order: a stint start of 0 is implied
     // by the first segment, and an out-of-range one would produce an empty seg.
-    final breaks = stintStarts
+    final breaks = [...stintStarts, ..._blackoutStarts(points)]
         .where((i) => i > 0 && i < points.length)
         .toSet()
         .toList()
@@ -92,6 +98,18 @@ class GpxExport {
       ..writeln('</gpx>');
     return b.toString();
   }
+
+  /// Indices in [points] at which recording resumed after a GPS blackout.
+  static List<int> _blackoutStarts(List<TrackPoint> points) => [
+        for (var i = 1; i < points.length; i++)
+          if (points[i]
+                  .timestamp
+                  .difference(points[i - 1].timestamp)
+                  .inSeconds
+                  .abs() >=
+              kSignalLossSeconds)
+            i,
+      ];
 
   /// A filesystem-safe basename like `throttlepath-morning-commute-20260728.gpx`.
   static String fileNameFor(Ride ride) {

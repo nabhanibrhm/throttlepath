@@ -355,6 +355,31 @@ class _TrackingMapScreenState extends ConsumerState<TrackingMapScreen> {
     };
   }
 
+  /// The live trail: one solid polyline per continuously-tracked run, joined by
+  /// a dimmed dash wherever GPS blacked out.
+  ///
+  /// The rider watching the screen in a tunnel is exactly the person who should
+  /// not be shown a confident straight line to wherever the phone reacquires.
+  List<Polyline> _livePolylines(TrackingUiState state, AppPalette cx) {
+    final bounds = [0, ...state.routeBreaks, state.route.length];
+    final out = <Polyline>[];
+    for (var i = 0; i < bounds.length - 1; i++) {
+      final run = state.route.sublist(bounds[i], bounds[i + 1]);
+      if (i > 0 && run.isNotEmpty) {
+        out.add(Polyline(
+          points: [state.route[bounds[i] - 1], run.first],
+          strokeWidth: 3.5,
+          color: cx.textDim.withValues(alpha: 0.55),
+          pattern: StrokePattern.dashed(segments: const [12, 10]),
+        ));
+      }
+      if (run.length >= 2) {
+        out.add(Polyline(points: run, strokeWidth: 5, color: cx.accentInk));
+      }
+    }
+    return out;
+  }
+
   Widget _buildMap(AppPalette cx, TrackingUiState state, LatLng? current) {
     return FlutterMap(
       mapController: _mapController,
@@ -379,15 +404,7 @@ class _TrackingMapScreenState extends ConsumerState<TrackingMapScreen> {
           tileProvider: NetworkTileProvider(silenceExceptions: true),
         ),
         if (state.route.length >= 2)
-          PolylineLayer(
-            polylines: [
-              Polyline(
-                points: state.route,
-                strokeWidth: 5,
-                color: cx.accentInk,
-              ),
-            ],
-          ),
+          PolylineLayer(polylines: _livePolylines(state, cx)),
         if (current != null)
           MarkerLayer(
             markers: [

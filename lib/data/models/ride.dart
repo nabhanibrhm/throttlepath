@@ -109,4 +109,14 @@ class Ride {
   /// comparing *across* rides; the band histogram the analysis tab draws is
   /// recomputed from the track it has already loaded rather than persisted.
   double? leanPeakDegrees;
+
+  /// Which revision of the derivation rules produced the fields above.
+  ///
+  /// Null on every ride written before this existed. The backfill re-derives
+  /// anything below `kDerivedVersion`, which is the only way a ride whose fields
+  /// are *present but stale* ever gets revisited — the work-list used to ask
+  /// "is anything null", and a wrong blob is not null. Bump the constant
+  /// whenever a change to `route_derivation.dart` would produce different
+  /// output for the same track.
+  int? derivedVersion;
 }

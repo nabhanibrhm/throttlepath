@@ -1,5 +1,7 @@
 import 'package:isar_community/isar.dart';
 
+import '../../core/track_runs.dart';
+
 part 'track_point.g.dart';
 
 /// A single GPS sample captured during a ride.
@@ -47,3 +49,13 @@ class TrackPoint {
   @Index()
   late DateTime timestamp;
 }
+
+/// How a stored point presents to the pure geometry in `core/track_runs.dart`,
+/// which must not know about Isar. Every caller that segments a track uses this
+/// one adapter, so "the same stretch of riding" means the same thing everywhere.
+TrackFix trackPointFix(TrackPoint p) =>
+    (time: p.timestamp, lat: p.latitude, lon: p.longitude);
+
+/// [points] split into runs with any displaced excursion removed.
+SegmentedTrack<TrackPoint> segmentTrackPoints(List<TrackPoint> points) =>
+    segmentTrack(points, fixOf: trackPointFix);

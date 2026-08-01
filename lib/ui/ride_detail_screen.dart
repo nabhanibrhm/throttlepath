@@ -5,9 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/date_format.dart';
 import '../core/duration_format.dart';
-import '../core/geo.dart';
 import '../core/lean.dart';
 import '../core/smoothness.dart';
+import '../core/track_runs.dart';
 import '../core/units.dart';
 import '../data/database_service.dart';
 import '../data/models/ride.dart';
@@ -82,12 +82,12 @@ class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
   /// then) and never re-enters while a render/share is in flight.
   Future<void> _share() async {
     if (_sharing) return;
-    final points = ref.read(rideTrackProvider(widget.ride.id)).valueOrNull;
-    if (points == null) return; // track still loading — button is disabled
+    final track = ref.read(rideTrackProvider(widget.ride.id)).valueOrNull;
+    if (track == null) return; // track still loading — button is disabled
     await showShareFlow(
       context,
       ride: widget.ride,
-      points: points,
+      points: track.points,
       unit: ref.read(speedUnitProvider),
       onBusyChanged: (b) {
         if (mounted) setState(() => _sharing = b);
@@ -127,8 +127,8 @@ class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
                   style: TextStyle(color: cx.dangerInk),
                 ),
               ),
-              data: (points) => _ExpandableMap(
-                points: points,
+              data: (track) => _ExpandableMap(
+                points: track.points,
                 unit: unit,
                 title: _title,
               ),
@@ -138,12 +138,15 @@ class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
             child: SingleChildScrollView(
               child: Column(
                 children: [
+                  if ((trackAsync.valueOrNull?.discardedCount ?? 0) > 0)
+                    _DiscardedNotice(
+                        count: trackAsync.value!.discardedCount),
                   _SummaryPanel(ride: widget.ride, unit: unit),
                   // Charts from the recorded track (needs at least two points).
-                  if ((trackAsync.valueOrNull?.length ?? 0) >= 2)
+                  if ((trackAsync.valueOrNull?.points.length ?? 0) >= 2)
                     _ChartTabs(
                       rideId: widget.ride.id,
-                      points: trackAsync.value!,
+                      points: trackAsync.value!.points,
                       avgSpeedKmh: widget.ride.averageSpeedKmh,
                       unit: unit,
                     ),
@@ -229,6 +232,48 @@ class _ExpandableMap extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Says so when fixes were left off the map.
+///
+/// The alternative was to drop them silently, which is worse than the bug it
+/// fixes: a rider who knows the phone lost the plot for two minutes should see
+/// the app agree, not wonder why the route looks different from the one they
+/// remember riding. The ride's distance and time are unaffected — the engine
+/// never counted these fixes either.
+class _DiscardedNotice extends StatelessWidget {
+  const _DiscardedNotice({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final cx = AppColors.of(context);
+    return Container(
+      width: double.infinity,
+      color: cx.canvas,
+      padding: const EdgeInsets.fromLTRB(22, 16, 22, 0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.satellite_alt_outlined, size: 15, color: cx.textTertiary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '$count GPS ${count == 1 ? 'fix' : 'fixes'} left off the map — '
+              'they placed the bike kilometres away while the signal was '
+              'recovering. Your distance and time are unchanged.',
+              style: TextStyle(
+                color: cx.textTertiary,
+                fontSize: 12,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -604,25 +649,22 @@ class _SpeedChartTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Distance frozen across blackouts, so the axis ends where the odometer in
+    // the panel above says the ride ended. Accumulating straight through a gap
+    // put a 3.8 km ride on a 37 km axis and had the takeaway announce a peak
+    // "34 km in".
+    final cumulative = cumulativeMeters(points, fixOf: trackPointFix);
     final spots = <FlSpot>[];
-    var distMeters = 0.0;
     var peakKmh = 0.0;
     var peakAtKm = 0.0;
     for (var i = 0; i < points.length; i++) {
-      if (i > 0) {
-        distMeters += haversineMeters(
-          points[i - 1].latitude,
-          points[i - 1].longitude,
-          points[i].latitude,
-          points[i].longitude,
-        );
-      }
+      final km = cumulative[i] / 1000.0;
       final kmh = points[i].speedMps * 3.6;
       if (kmh > peakKmh) {
         peakKmh = kmh;
-        peakAtKm = distMeters / 1000.0;
+        peakAtKm = km;
       }
-      spots.add(FlSpot(distMeters / 1000.0, kmh));
+      spots.add(FlSpot(km, kmh));
     }
 
     return ChartFrame(

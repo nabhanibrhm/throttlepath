@@ -305,19 +305,37 @@ class _TripMap extends StatelessWidget {
   Widget build(BuildContext context) {
     final cx = AppColors.of(context);
 
-    // Per-stint polylines + the flattened point set for the camera fit.
+    // Per-stint polylines + the flattened point set for the camera fit. A stint
+    // draws one polyline per continuously-tracked run, with a dimmed dash across
+    // each blackout — one line through the gap would put the trip down roads
+    // nobody rode, and the camera would frame them too.
     final polylines = <Polyline>[];
+    final connectors = <Polyline>[];
     final allPoints = <LatLng>[];
     final stintLatLngs = <List<LatLng>>[];
     for (var i = 0; i < stintTracks.length; i++) {
-      final pts = [
-        for (final p in stintTracks[i].track) LatLng(p.latitude, p.longitude)
-      ];
+      final runs = stintTracks[i].segmented.runs;
+      final pts = <LatLng>[];
+      for (var r = 0; r < runs.length; r++) {
+        final run = [
+          for (final p in runs[r]) LatLng(p.latitude, p.longitude),
+        ];
+        if (r > 0 && pts.isNotEmpty && run.isNotEmpty) {
+          connectors.add(Polyline(
+            points: [pts.last, run.first],
+            strokeWidth: 3.5,
+            color: cx.textDim.withValues(alpha: 0.55),
+            pattern: StrokePattern.dashed(segments: const [12, 10]),
+          ));
+        }
+        if (run.length >= 2) {
+          polylines.add(
+              Polyline(points: run, strokeWidth: 5, color: _stintColor(i)));
+        }
+        pts.addAll(run);
+      }
       stintLatLngs.add(pts);
       allPoints.addAll(pts);
-      if (pts.length >= 2) {
-        polylines.add(Polyline(points: pts, strokeWidth: 5, color: _stintColor(i)));
-      }
     }
 
     if (allPoints.isEmpty) {
@@ -360,6 +378,7 @@ class _TripMap extends StatelessWidget {
           userAgentPackageName: 'id.co.opentrack.throttlepath',
           tileProvider: NetworkTileProvider(silenceExceptions: true),
         ),
+        if (connectors.isNotEmpty) PolylineLayer(polylines: connectors),
         if (polylines.isNotEmpty) PolylineLayer(polylines: polylines),
         MarkerLayer(
           markers: [

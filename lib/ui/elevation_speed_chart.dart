@@ -2,6 +2,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 
 import '../core/duration_format.dart';
+import '../core/track_runs.dart';
 import '../core/units.dart';
 import '../data/models/track_point.dart';
 import '../theme/app_theme.dart';
@@ -58,13 +59,20 @@ class _ElevationSpeedChartState extends State<ElevationSpeedChart> {
     final start = points.first.timestamp;
 
     // Raw altitude series (only points that carry altitude), paired with time.
+    // `resumed` marks each sample that is the first after a GPS blackout.
     final times = <double>[];
     final rawAlt = <double>[];
+    final resumed = <bool>[];
+    DateTime? previous;
     for (final p in points) {
       final alt = p.altitude;
       if (alt == null) continue;
       times.add(p.timestamp.difference(start).inMilliseconds / 1000.0);
       rawAlt.add(alt);
+      resumed.add(previous != null &&
+          p.timestamp.difference(previous).inSeconds.abs() >=
+              kSignalLossSeconds);
+      previous = p.timestamp;
     }
     if (rawAlt.length < 2) return const SizedBox.shrink();
 
@@ -87,9 +95,17 @@ class _ElevationSpeedChartState extends State<ElevationSpeedChart> {
     // Gain/loss by hysteresis: only commit a move once it has drifted at least
     // _gainThreshold from the running reference, then re-anchor. Captures slow
     // climbs (which accumulate against the reference) while ignoring jitter.
+    // A blackout re-anchors instead of committing: whatever the rider climbed
+    // while GPS was out was not measured, and crediting the whole step to the
+    // one fix that ended the dead zone would invent a cliff.
     var gain = 0.0, loss = 0.0;
     var ref = alt.first;
-    for (final a in alt) {
+    for (var i = 0; i < alt.length; i++) {
+      final a = alt[i];
+      if (resumed[i]) {
+        ref = a;
+        continue;
+      }
       final d = a - ref;
       if (d >= ElevationSpeedChart._gainThreshold) {
         gain += d;

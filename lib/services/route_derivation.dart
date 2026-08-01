@@ -22,6 +22,14 @@ import '../data/models/track_point.dart';
 /// *shape* is still stored — a blob costs nothing and is simply too small to draw.
 const double kRouteMinDistanceMeters = 200;
 
+/// Revision of the rules below. Bump it whenever a change here would produce
+/// different output for an unchanged track; the backfill then revisits every
+/// ride stamped with an older number (see `Ride.derivedVersion`).
+///
+/// 2 — derives from the *segmented* track (blackouts cut, displaced excursions
+/// dropped) rather than the raw fix list. Version 1 blobs drew the phantom.
+const int kDerivedVersion = 2;
+
 /// Smoothness scored from [points]' speed trace, or null when the track is too
 /// sparse to say anything (see `kMinSmoothnessSamples`).
 double? deriveSmoothness(List<TrackPoint> points) =>
@@ -63,8 +71,14 @@ double? deriveSmoothness(List<TrackPoint> points) =>
   double? leanPeak,
 }) deriveRoute(
   Ride ride,
-  List<TrackPoint> points,
+  List<TrackPoint> rawPoints,
 ) {
+  // Everything below is geometry, so it reads the segmented track — the same one
+  // the maps and charts draw. A displaced excursion left in here does not just
+  // add noise: RDP *preferentially keeps* it (it is the maximum-deviation
+  // vertex), and since `normalizeRoute` scales each axis independently, one
+  // 18 km artefact flattens the real ride to a hairline on every sparkline.
+  final points = segmentTrackPoints(rawPoints).points;
   if (points.length < 2) {
     return (
       key: null,
@@ -110,7 +124,8 @@ Future<void> stampDerivedRoute(DatabaseService db, Ride ride) async {
     ..routeBlob = derived.blob
     ..smoothness = derived.smoothness
     ..leanP95Degrees = derived.leanP95
-    ..leanPeakDegrees = derived.leanPeak;
+    ..leanPeakDegrees = derived.leanPeak
+    ..derivedVersion = kDerivedVersion;
 }
 
 /// Fills in `routeKey` / `routeBlob` / `smoothness` for finished rides recorded
@@ -145,7 +160,8 @@ class RouteBackfill {
     _running = true;
     try {
       final db = DatabaseService.instance;
-      final missing = await db.getRidesMissingDerived();
+      final missing =
+          await db.getRidesMissingDerived(derivedVersion: kDerivedVersion);
       var updated = 0;
       final todo = missing.where((r) => !_attempted.contains(r.id));
       for (final ride in todo.take(_maxPerRun)) {
@@ -166,6 +182,7 @@ class RouteBackfill {
           smoothness: derived.smoothness,
           leanP95Degrees: derived.leanP95,
           leanPeakDegrees: derived.leanPeak,
+          derivedVersion: kDerivedVersion,
         );
         updated++;
       }

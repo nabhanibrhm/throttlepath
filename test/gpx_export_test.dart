@@ -137,6 +137,40 @@ void main() {
       });
     });
 
+    group('GPS blackouts', () {
+      final start = DateTime.utc(2026, 7, 31, 17, 0);
+      List<TrackPoint> at(List<int> seconds) => [
+            for (final s in seconds)
+              point(-6.9 + s * 0.0001, 107.6,
+                  at: start.add(Duration(seconds: s))),
+          ];
+
+      test('a gap in recording ends the segment', () {
+        // GPX segments mean "recording stopped and restarted". Joining across a
+        // dead zone would have every reader re-derive the phantom straight line
+        // the app itself refuses to count.
+        final gpx = GpxExport.buildGpx(ride: ride(), points: at([0, 1, 2, 300, 301]));
+        expect('<trkseg>'.allMatches(gpx).length, 2);
+        expect('<trkpt'.allMatches(gpx).length, 5);
+      });
+
+      test('an ordinary cadence stays in one segment', () {
+        final gpx =
+            GpxExport.buildGpx(ride: ride(), points: at([0, 2, 4, 9, 14, 19]));
+        expect('<trkseg>'.allMatches(gpx).length, 1);
+      });
+
+      test('blackout and stint boundaries combine without duplicating', () {
+        // A stint that also happens to start after a blackout is one break,
+        // not two — an empty <trkseg> is a malformed-looking export.
+        final points = at([0, 1, 2, 300, 301, 302]);
+        final gpx = GpxExport.buildGpx(
+            ride: ride(), points: points, stintStarts: const [3]);
+        expect('<trkseg>'.allMatches(gpx).length, 2);
+        expect('<trkpt'.allMatches(gpx).length, 6);
+      });
+    });
+
     test('no points still yields a parseable document', () {
       // The share path refuses to export an empty track, but the serialiser must
       // not produce broken XML if it is ever called with one.

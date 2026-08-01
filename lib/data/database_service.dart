@@ -146,6 +146,7 @@ class DatabaseService {
     double? smoothness,
     double? leanP95Degrees,
     double? leanPeakDegrees,
+    required int derivedVersion,
   }) {
     return _updateRide(rideId, (ride) {
       ride.routeKey = routeKey;
@@ -153,13 +154,18 @@ class DatabaseService {
       ride.smoothness = smoothness;
       ride.leanP95Degrees = leanP95Degrees;
       ride.leanPeakDegrees = leanPeakDegrees;
+      ride.derivedVersion = derivedVersion;
     });
   }
 
-  /// Finished rides still missing any track-derived field, newest first — the
-  /// work-list for the backfill. Rides still recording are skipped: their track
-  /// isn't final yet.
-  Future<List<Ride>> getRidesMissingDerived() {
+  /// Finished rides whose track-derived fields are missing or stale, newest
+  /// first — the work-list for the backfill. Rides still recording are skipped:
+  /// their track isn't final yet.
+  ///
+  /// The version clause is what lets a *correction* reach rides that already
+  /// have values. Without it a ride carrying a blob derived under the old rules
+  /// would never be looked at again, because none of its fields are null.
+  Future<List<Ride>> getRidesMissingDerived({required int derivedVersion}) {
     return isar.rides
         .filter()
         .endTimeIsNotNull()
@@ -170,7 +176,11 @@ class DatabaseService {
             .or()
             .smoothnessIsNull()
             .or()
-            .leanP95DegreesIsNull())
+            .leanP95DegreesIsNull()
+            .or()
+            .derivedVersionIsNull()
+            .or()
+            .derivedVersionLessThan(derivedVersion))
         .sortByStartTimeDesc()
         .findAll();
   }

@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'geo.dart';
+import 'track_runs.dart';
 
 /// Estimated cornering lean angle, derived from how fast the bike's heading turns.
 ///
@@ -302,17 +303,13 @@ LeanAnalysis analyseLean(
   final start = readings.first.time;
 
   // Cumulative distance along the track, so a sample can be placed on the same
-  // x-axis the speed chart uses.
-  final cumulative = List<double>.filled(readings.length, 0.0);
-  for (var i = 1; i < readings.length; i++) {
-    cumulative[i] = cumulative[i - 1] +
-        haversineMeters(
-          readings[i - 1].latitude,
-          readings[i - 1].longitude,
-          readings[i].latitude,
-          readings[i].longitude,
-        );
-  }
+  // x-axis the speed chart uses — which means it has to freeze across a GPS
+  // blackout exactly as that one does, or the two charts disagree about where
+  // the same moment of the ride happened.
+  final cumulative = cumulativeMeters(
+    readings,
+    fixOf: (r) => (time: r.time, lat: r.latitude, lon: r.longitude),
+  );
 
   final samples = <LeanSample>[];
   // Index of the centre reading each sample came from, so corroboration can tell

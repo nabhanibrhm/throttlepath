@@ -33,6 +33,7 @@ class TrackingUiState {
     this.countdown = 0,
     this.telemetry,
     this.route = const [],
+    this.routeBreaks = const [],
     this.speedSamples = const [],
     this.leanMaxLeftDegrees = 0,
     this.leanMaxRightDegrees = 0,
@@ -53,6 +54,13 @@ class TrackingUiState {
   final int countdown;
   final LiveTelemetry? telemetry;
   final List<LatLng> route;
+
+  /// Indices into [route] where the polyline resumes after a GPS blackout.
+  ///
+  /// The engine already refuses to count these segments toward distance, so the
+  /// live map must not draw them as ridden either — it would show a straight
+  /// line to wherever the phone reacquired, sometimes kilometres off.
+  final List<int> routeBreaks;
 
   /// Per-fix (distance, speed) samples for the live chart, in capture order.
   final List<SpeedSample> speedSamples;
@@ -82,6 +90,7 @@ class TrackingUiState {
     int? countdown,
     LiveTelemetry? telemetry,
     List<LatLng>? route,
+    List<int>? routeBreaks,
     List<SpeedSample>? speedSamples,
     double? leanMaxLeftDegrees,
     double? leanMaxRightDegrees,
@@ -101,6 +110,7 @@ class TrackingUiState {
       countdown: countdown ?? this.countdown,
       telemetry: clearTelemetry ? null : (telemetry ?? this.telemetry),
       route: route ?? this.route,
+      routeBreaks: routeBreaks ?? this.routeBreaks,
       speedSamples: speedSamples ?? this.speedSamples,
       leanMaxLeftDegrees: leanMaxLeftDegrees ?? this.leanMaxLeftDegrees,
       leanMaxRightDegrees: leanMaxRightDegrees ?? this.leanMaxRightDegrees,
@@ -139,6 +149,7 @@ class TrackingController extends StateNotifier<TrackingUiState> {
       countdown: t.countdown,
       telemetry: t,
       route: track.route,
+      routeBreaks: track.breaks,
       speedSamples: track.samples,
       leanMaxLeftDegrees: leanMax.left,
       leanMaxRightDegrees: leanMax.right,
@@ -163,26 +174,44 @@ class TrackingController extends StateNotifier<TrackingUiState> {
     );
   }
 
+  /// Set while a blackout is in progress, so the next vertex starts a new run
+  /// instead of extending the old one across the dead zone.
+  bool _resumingFromBlackout = false;
+
   /// The polyline and chart samples after folding in [t], unchanged when [t]
   /// carries nothing new.
   ///
   /// Telemetry ticks once a second and re-sends the last known coordinates, so
   /// growing the polyline on every tick would pile up duplicate vertices at a
   /// standstill.
-  ({List<LatLng> route, List<SpeedSample> samples}) _extendTrack(
-      LiveTelemetry t) {
+  ({List<LatLng> route, List<int> breaks, List<SpeedSample> samples})
+      _extendTrack(LiveTelemetry t) {
     final route = state.route;
     final samples = state.speedSamples;
+    var breaks = state.routeBreaks;
     final lat = t.lat;
     final lon = t.lon;
-    if (lat == null || lon == null) return (route: route, samples: samples);
+
+    // The engine's own blackout flag, rather than timing the ticks here: it
+    // already distinguishes "no fix for 12 s" from "parked, so the coordinates
+    // stopped changing", and only the first is a break in the track.
+    if (t.signalLost) _resumingFromBlackout = route.isNotEmpty;
+
+    if (lat == null || lon == null) {
+      return (route: route, breaks: breaks, samples: samples);
+    }
 
     final last = route.isNotEmpty ? route.last : null;
     if (last != null && last.latitude == lat && last.longitude == lon) {
-      return (route: route, samples: samples);
+      return (route: route, breaks: breaks, samples: samples);
+    }
+    if (_resumingFromBlackout) {
+      breaks = [...breaks, route.length];
+      _resumingFromBlackout = false;
     }
     return (
       route: [...route, LatLng(lat, lon)],
+      breaks: breaks,
       // A chart sample only on a real new fix while recording — distance only
       // advances then, so acquiring/countdown fixes carry none.
       samples: t.phase == 'recording'
@@ -205,6 +234,7 @@ class TrackingController extends StateNotifier<TrackingUiState> {
       phase: 'idle',
       countdown: 0,
       route: const [],
+      routeBreaks: const [],
       speedSamples: const [],
       leanMaxLeftDegrees: 0,
       leanMaxRightDegrees: 0,
@@ -227,6 +257,7 @@ class TrackingController extends StateNotifier<TrackingUiState> {
       phase: 'acquiring',
       countdown: 0,
       route: const [],
+      routeBreaks: const [],
       speedSamples: const [],
       leanMaxLeftDegrees: 0,
       leanMaxRightDegrees: 0,
@@ -396,6 +427,7 @@ class TrackingController extends StateNotifier<TrackingUiState> {
       phase: 'idle',
       countdown: 0,
       route: const [],
+      routeBreaks: const [],
       speedSamples: const [],
       leanMaxLeftDegrees: 0,
       leanMaxRightDegrees: 0,

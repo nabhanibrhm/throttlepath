@@ -416,13 +416,30 @@ Future<void> onStart(ServiceInstance service) async {
     currentLeanDegrees = null;
   }
 
-  // Banks an in-progress blackout's frozen interval into totalPaused so it stays
-  // out of duration/avg, then clears the marker. Idempotent, so the manual-pause
-  // and re-anchor paths can both call it without double-counting.
-  void bankSignalLoss(DateTime now) {
+  // Resolves an in-progress blackout, clearing the marker either way.
+  //
+  // While GPS is out the clock is frozen provisionally, because at that moment
+  // there is no way to tell a rider parked in a basement from one crossing a
+  // tunnel at 80 km/h. The returning fix settles it, and the two cases want
+  // opposite answers:
+  //
+  //   [displaced] — the rider covered real ground we could not measure. The
+  //   distance is excluded (the re-anchor refused to bridge it), so the time has
+  //   to be excluded too or the average speed is diluted by riding that isn't in
+  //   the numerator. Bank it.
+  //
+  //   not displaced — the rider came back to where they left, so nothing was
+  //   missed but the standing around. That is ordinary stopped time, and
+  //   `durationSeconds` is start-to-stop wall clock. Give it back by clearing
+  //   the marker without banking; moving time is unaffected, since it only
+  //   accrues on ticks with a live fix above the moving threshold.
+  //
+  // Idempotent, so the manual-pause and re-anchor paths can both call it without
+  // double-counting.
+  void bankSignalLoss(DateTime now, {required bool displaced}) {
     final lostAt = signalLostAt;
     if (lostAt == null) return;
-    totalPaused += now.difference(lostAt);
+    if (displaced) totalPaused += now.difference(lostAt);
     signalLostAt = null;
   }
 
@@ -714,9 +731,9 @@ Future<void> onStart(ServiceInstance service) async {
         lastFixAt = now;
         dropSmoothingState();
         rejectedStreak = 0;
-        // A blackout that ended with a far jump — bank the frozen time so it
-        // stays out of duration/avg.
-        bankSignalLoss(now);
+        // A blackout that ended with a far jump — by definition displaced, so
+        // the frozen time stays out of duration/avg.
+        bankSignalLoss(now, displaced: true);
         return;
       }
       rejectedStreak = 0;
@@ -733,7 +750,15 @@ Future<void> onStart(ServiceInstance service) async {
       // straight line across a tunnel is phantom, not ridden.
       if (longGap) {
         dropSmoothingState();
-        bankSignalLoss(now);
+        // Displaced only if the rider actually got somewhere while GPS was out.
+        // Straight-line displacement over the gap is the honest test and it
+        // scales: 400 m over twenty minutes is a car park, 16 km over twelve is
+        // a tunnel. A fixed metre radius would have called both the same.
+        bankSignalLoss(
+          now,
+          displaced: displacementSpeedKmh == null ||
+              displacementSpeedKmh > _kMovingSpeedThresholdKmh,
+        );
       }
 
       // Feed the Kalman filter. Fuse the Doppler velocity only when moving fast
@@ -854,9 +879,10 @@ Future<void> onStart(ServiceInstance service) async {
   service.on('pause').listen((_) {
     if (phase != 'recording' || paused) return;
     final now = DateTime.now();
-    // If a blackout was in progress, bank its frozen time before the manual
-    // pause takes over, so the two freezes can't double-count.
-    bankSignalLoss(now);
+    // If a blackout was in progress, resolve it before the manual pause takes
+    // over, so the two freezes can't double-count. Not displaced: the rider is
+    // holding the phone, which is the one thing that proves they are here.
+    bankSignalLoss(now, displaced: false);
     paused = true;
     pauseStartedAt = now;
     currentSpeedKmh = 0.0;

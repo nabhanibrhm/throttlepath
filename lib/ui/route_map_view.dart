@@ -3,6 +3,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../core/speed_palette.dart';
+import '../core/track_runs.dart';
 import '../core/units.dart';
 import '../data/models/track_point.dart';
 import '../theme/app_theme.dart';
@@ -35,6 +36,9 @@ class RouteMapView extends StatelessWidget {
   /// polylines instead of one-per-fix while keeping the exact geometry.
   static const int _bands = 26;
 
+  /// Dash geometry for a gap connector, in logical pixels: on, off.
+  static const List<double> _gapDash = [12, 10];
+
   @override
   Widget build(BuildContext context) {
     final cx = AppColors.of(context);
@@ -46,7 +50,15 @@ class RouteMapView extends StatelessWidget {
 
     final speeds = [for (final p in points) p.speedMps * 3.6]; // km/h
     final maxSpeed = speeds.fold(0.0, (m, s) => s > m ? s : m);
-    final segments = _speedSegments(route, speeds, maxSpeed);
+    // Runs of continuously-tracked riding. The caller has already dropped any
+    // displaced excursion; what is left are honest blackouts, and drawing
+    // straight through one would claim roads nobody rode.
+    final runs = splitIntoRuns(points, fixOf: trackPointFix);
+    final segments = [
+      ..._gapConnectors(runs, cx),
+      for (final run in _runRanges(runs))
+        ..._speedSegments(route, speeds, maxSpeed, run.from, run.to),
+    ];
 
     return Stack(
       children: [
@@ -95,15 +107,50 @@ class RouteMapView extends StatelessWidget {
     );
   }
 
+  /// Half-open `[from, to)` index ranges into the flat point list, one per run.
+  List<({int from, int to})> _runRanges(List<List<TrackPoint>> runs) {
+    final out = <({int from, int to})>[];
+    var at = 0;
+    for (final run in runs) {
+      out.add((from: at, to: at + run.length));
+      at += run.length;
+    }
+    return out;
+  }
+
+  /// A dimmed dash across each blackout, joining the last fix before it to the
+  /// first fix after.
+  ///
+  /// Deliberately *not* on the speed gradient: any colour from the palette would
+  /// be read off the legend as a speed, and there is no speed here — nothing was
+  /// measured. A neutral dash reads as what it is, an inference, and it keeps
+  /// reading that way when the gap is 16 km instead of 400 m.
+  List<Polyline> _gapConnectors(List<List<TrackPoint>> runs, AppPalette cx) => [
+        for (var i = 1; i < runs.length; i++)
+          if (runs[i - 1].isNotEmpty && runs[i].isNotEmpty)
+            Polyline(
+              points: [
+                LatLng(runs[i - 1].last.latitude, runs[i - 1].last.longitude),
+                LatLng(runs[i].first.latitude, runs[i].first.longitude),
+              ],
+              strokeWidth: 3.5,
+              color: cx.textDim.withValues(alpha: 0.55),
+              pattern: StrokePattern.dashed(segments: _gapDash),
+            ),
+      ];
+
   /// Builds one polyline per run of consecutive segments sharing a speed band,
-  /// colored via [SpeedPalette]. Each run reuses the previous run's boundary
-  /// vertex so the colored line stays continuous (no gaps at band changes).
+  /// colored via [SpeedPalette], over the half-open range `[from, to)`. Each run
+  /// reuses the previous run's boundary vertex so the colored line stays
+  /// continuous (no gaps at band changes).
   List<Polyline> _speedSegments(
     List<LatLng> route,
     List<double> speeds,
     double maxSpeed,
+    int from,
+    int to,
   ) {
-    if (route.length < 2) return const [];
+    if (to - from < 2) return const [];
     int bandOf(int seg) {
       // Segment `seg` joins route[seg-1]→route[seg]; color by its mean speed.
       final s = (speeds[seg - 1] + speeds[seg]) / 2;
@@ -112,8 +159,8 @@ class RouteMapView extends StatelessWidget {
     }
 
     final out = <Polyline>[];
-    var runStart = 1; // first segment index
-    var runBand = bandOf(1);
+    var runStart = from + 1; // first segment index within this run
+    var runBand = bandOf(runStart);
     void flush(int endSeg) {
       out.add(Polyline(
         points: route.sublist(runStart - 1, endSeg + 1),
@@ -122,7 +169,7 @@ class RouteMapView extends StatelessWidget {
       ));
     }
 
-    for (var seg = 2; seg < route.length; seg++) {
+    for (var seg = from + 2; seg < to; seg++) {
       final band = bandOf(seg);
       if (band != runBand) {
         flush(seg - 1);
@@ -130,7 +177,7 @@ class RouteMapView extends StatelessWidget {
         runBand = band;
       }
     }
-    flush(route.length - 1);
+    flush(to - 1);
     return out;
   }
 

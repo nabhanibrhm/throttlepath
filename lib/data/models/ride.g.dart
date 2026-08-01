@@ -22,78 +22,83 @@ const RideSchema = CollectionSchema(
       name: r'averageSpeedKmh',
       type: IsarType.double,
     ),
-    r'durationSeconds': PropertySchema(
+    r'derivedVersion': PropertySchema(
       id: 1,
+      name: r'derivedVersion',
+      type: IsarType.long,
+    ),
+    r'durationSeconds': PropertySchema(
+      id: 2,
       name: r'durationSeconds',
       type: IsarType.long,
     ),
     r'endPlace': PropertySchema(
-      id: 2,
+      id: 3,
       name: r'endPlace',
       type: IsarType.string,
     ),
     r'endTime': PropertySchema(
-      id: 3,
+      id: 4,
       name: r'endTime',
       type: IsarType.dateTime,
     ),
     r'gpsSource': PropertySchema(
-      id: 4,
+      id: 5,
       name: r'gpsSource',
       type: IsarType.string,
     ),
     r'leanP95Degrees': PropertySchema(
-      id: 5,
+      id: 6,
       name: r'leanP95Degrees',
       type: IsarType.double,
     ),
     r'leanPeakDegrees': PropertySchema(
-      id: 6,
+      id: 7,
       name: r'leanPeakDegrees',
       type: IsarType.double,
     ),
     r'maxSpeedKmh': PropertySchema(
-      id: 7,
+      id: 8,
       name: r'maxSpeedKmh',
       type: IsarType.double,
     ),
     r'movingSeconds': PropertySchema(
-      id: 8,
+      id: 9,
       name: r'movingSeconds',
       type: IsarType.long,
     ),
-    r'name': PropertySchema(id: 9, name: r'name', type: IsarType.string),
+    r'name': PropertySchema(id: 10, name: r'name', type: IsarType.string),
     r'routeBlob': PropertySchema(
-      id: 10,
+      id: 11,
       name: r'routeBlob',
       type: IsarType.doubleList,
     ),
     r'routeKey': PropertySchema(
-      id: 11,
+      id: 12,
       name: r'routeKey',
       type: IsarType.string,
     ),
     r'smoothness': PropertySchema(
-      id: 12,
+      id: 13,
       name: r'smoothness',
       type: IsarType.double,
     ),
     r'startPlace': PropertySchema(
-      id: 13,
+      id: 14,
       name: r'startPlace',
       type: IsarType.string,
     ),
     r'startTime': PropertySchema(
-      id: 14,
+      id: 15,
       name: r'startTime',
       type: IsarType.dateTime,
     ),
     r'totalDistanceMeters': PropertySchema(
-      id: 15,
+      id: 16,
       name: r'totalDistanceMeters',
       type: IsarType.double,
     ),
-    r'tripId': PropertySchema(id: 16, name: r'tripId', type: IsarType.long),
+    r'tripId': PropertySchema(id: 17, name: r'tripId', type: IsarType.long),
   },
 
   estimateSize: _rideEstimateSize,
@@ -203,22 +208,23 @@ void _rideSerialize(
   Map<Type, List<int>> allOffsets,
 ) {
   writer.writeDouble(offsets[0], object.averageSpeedKmh);
-  writer.writeLong(offsets[1], object.durationSeconds);
-  writer.writeString(offsets[2], object.endPlace);
-  writer.writeDateTime(offsets[3], object.endTime);
-  writer.writeString(offsets[4], object.gpsSource);
-  writer.writeDouble(offsets[5], object.leanP95Degrees);
-  writer.writeDouble(offsets[6], object.leanPeakDegrees);
-  writer.writeDouble(offsets[7], object.maxSpeedKmh);
-  writer.writeLong(offsets[8], object.movingSeconds);
-  writer.writeString(offsets[9], object.name);
-  writer.writeDoubleList(offsets[10], object.routeBlob);
-  writer.writeString(offsets[11], object.routeKey);
-  writer.writeDouble(offsets[12], object.smoothness);
-  writer.writeString(offsets[13], object.startPlace);
-  writer.writeDateTime(offsets[14], object.startTime);
-  writer.writeDouble(offsets[15], object.totalDistanceMeters);
-  writer.writeLong(offsets[16], object.tripId);
+  writer.writeLong(offsets[1], object.derivedVersion);
+  writer.writeLong(offsets[2], object.durationSeconds);
+  writer.writeString(offsets[3], object.endPlace);
+  writer.writeDateTime(offsets[4], object.endTime);
+  writer.writeString(offsets[5], object.gpsSource);
+  writer.writeDouble(offsets[6], object.leanP95Degrees);
+  writer.writeDouble(offsets[7], object.leanPeakDegrees);
+  writer.writeDouble(offsets[8], object.maxSpeedKmh);
+  writer.writeLong(offsets[9], object.movingSeconds);
+  writer.writeString(offsets[10], object.name);
+  writer.writeDoubleList(offsets[11], object.routeBlob);
+  writer.writeString(offsets[12], object.routeKey);
+  writer.writeDouble(offsets[13], object.smoothness);
+  writer.writeString(offsets[14], object.startPlace);
+  writer.writeDateTime(offsets[15], object.startTime);
+  writer.writeDouble(offsets[16], object.totalDistanceMeters);
+  writer.writeLong(offsets[17], object.tripId);
 }
 
 Ride _rideDeserialize(
@@ -229,23 +235,24 @@ Ride _rideDeserialize(
 ) {
   final object = Ride();
   object.averageSpeedKmh = reader.readDouble(offsets[0]);
-  object.durationSeconds = reader.readLong(offsets[1]);
-  object.endPlace = reader.readStringOrNull(offsets[2]);
-  object.endTime = reader.readDateTimeOrNull(offsets[3]);
-  object.gpsSource = reader.readStringOrNull(offsets[4]);
+  object.derivedVersion = reader.readLongOrNull(offsets[1]);
+  object.durationSeconds = reader.readLong(offsets[2]);
+  object.endPlace = reader.readStringOrNull(offsets[3]);
+  object.endTime = reader.readDateTimeOrNull(offsets[4]);
+  object.gpsSource = reader.readStringOrNull(offsets[5]);
   object.id = id;
-  object.leanP95Degrees = reader.readDoubleOrNull(offsets[5]);
-  object.leanPeakDegrees = reader.readDoubleOrNull(offsets[6]);
-  object.maxSpeedKmh = reader.readDouble(offsets[7]);
-  object.movingSeconds = reader.readLong(offsets[8]);
-  object.name = reader.readStringOrNull(offsets[9]);
-  object.routeBlob = reader.readDoubleList(offsets[10]);
-  object.routeKey = reader.readStringOrNull(offsets[11]);
-  object.smoothness = reader.readDoubleOrNull(offsets[12]);
-  object.startPlace = reader.readStringOrNull(offsets[13]);
-  object.startTime = reader.readDateTime(offsets[14]);
-  object.totalDistanceMeters = reader.readDouble(offsets[15]);
-  object.tripId = reader.readLongOrNull(offsets[16]);
+  object.leanP95Degrees = reader.readDoubleOrNull(offsets[6]);
+  object.leanPeakDegrees = reader.readDoubleOrNull(offsets[7]);
+  object.maxSpeedKmh = reader.readDouble(offsets[8]);
+  object.movingSeconds = reader.readLong(offsets[9]);
+  object.name = reader.readStringOrNull(offsets[10]);
+  object.routeBlob = reader.readDoubleList(offsets[11]);
+  object.routeKey = reader.readStringOrNull(offsets[12]);
+  object.smoothness = reader.readDoubleOrNull(offsets[13]);
+  object.startPlace = reader.readStringOrNull(offsets[14]);
+  object.startTime = reader.readDateTime(offsets[15]);
+  object.totalDistanceMeters = reader.readDouble(offsets[16]);
+  object.tripId = reader.readLongOrNull(offsets[17]);
   return object;
 }
 
@@ -259,36 +266,38 @@ P _rideDeserializeProp<P>(
     case 0:
       return (reader.readDouble(offset)) as P;
     case 1:
-      return (reader.readLong(offset)) as P;
+      return (reader.readLongOrNull(offset)) as P;
     case 2:
-      return (reader.readStringOrNull(offset)) as P;
+      return (reader.readLong(offset)) as P;
     case 3:
-      return (reader.readDateTimeOrNull(offset)) as P;
-    case 4:
       return (reader.readStringOrNull(offset)) as P;
+    case 4:
+      return (reader.readDateTimeOrNull(offset)) as P;
     case 5:
-      return (reader.readDoubleOrNull(offset)) as P;
+      return (reader.readStringOrNull(offset)) as P;
     case 6:
       return (reader.readDoubleOrNull(offset)) as P;
     case 7:
-      return (reader.readDouble(offset)) as P;
-    case 8:
-      return (reader.readLong(offset)) as P;
-    case 9:
-      return (reader.readStringOrNull(offset)) as P;
-    case 10:
-      return (reader.readDoubleList(offset)) as P;
-    case 11:
-      return (reader.readStringOrNull(offset)) as P;
-    case 12:
       return (reader.readDoubleOrNull(offset)) as P;
-    case 13:
-      return (reader.readStringOrNull(offset)) as P;
-    case 14:
-      return (reader.readDateTime(offset)) as P;
-    case 15:
+    case 8:
       return (reader.readDouble(offset)) as P;
+    case 9:
+      return (reader.readLong(offset)) as P;
+    case 10:
+      return (reader.readStringOrNull(offset)) as P;
+    case 11:
+      return (reader.readDoubleList(offset)) as P;
+    case 12:
+      return (reader.readStringOrNull(offset)) as P;
+    case 13:
+      return (reader.readDoubleOrNull(offset)) as P;
+    case 14:
+      return (reader.readStringOrNull(offset)) as P;
+    case 15:
+      return (reader.readDateTime(offset)) as P;
     case 16:
+      return (reader.readDouble(offset)) as P;
+    case 17:
       return (reader.readLongOrNull(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
@@ -773,6 +782,81 @@ extension RideQueryFilter on QueryBuilder<Ride, Ride, QFilterCondition> {
           includeUpper: includeUpper,
 
           epsilon: epsilon,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> derivedVersionIsNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        const FilterCondition.isNull(property: r'derivedVersion'),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> derivedVersionIsNotNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        const FilterCondition.isNotNull(property: r'derivedVersion'),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> derivedVersionEqualTo(
+    int? value,
+  ) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.equalTo(property: r'derivedVersion', value: value),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> derivedVersionGreaterThan(
+    int? value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.greaterThan(
+          include: include,
+          property: r'derivedVersion',
+          value: value,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> derivedVersionLessThan(
+    int? value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.lessThan(
+          include: include,
+          property: r'derivedVersion',
+          value: value,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterFilterCondition> derivedVersionBetween(
+    int? lower,
+    int? upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.between(
+          property: r'derivedVersion',
+          lower: lower,
+          includeLower: includeLower,
+          upper: upper,
+          includeUpper: includeUpper,
         ),
       );
     });
@@ -2552,6 +2636,18 @@ extension RideQuerySortBy on QueryBuilder<Ride, Ride, QSortBy> {
     });
   }
 
+  QueryBuilder<Ride, Ride, QAfterSortBy> sortByDerivedVersion() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'derivedVersion', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterSortBy> sortByDerivedVersionDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'derivedVersion', Sort.desc);
+    });
+  }
+
   QueryBuilder<Ride, Ride, QAfterSortBy> sortByDurationSeconds() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'durationSeconds', Sort.asc);
@@ -2743,6 +2839,18 @@ extension RideQuerySortThenBy on QueryBuilder<Ride, Ride, QSortThenBy> {
   QueryBuilder<Ride, Ride, QAfterSortBy> thenByAverageSpeedKmhDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'averageSpeedKmh', Sort.desc);
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterSortBy> thenByDerivedVersion() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'derivedVersion', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Ride, Ride, QAfterSortBy> thenByDerivedVersionDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'derivedVersion', Sort.desc);
     });
   }
 
@@ -2946,6 +3054,12 @@ extension RideQueryWhereDistinct on QueryBuilder<Ride, Ride, QDistinct> {
     });
   }
 
+  QueryBuilder<Ride, Ride, QDistinct> distinctByDerivedVersion() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'derivedVersion');
+    });
+  }
+
   QueryBuilder<Ride, Ride, QDistinct> distinctByDurationSeconds() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(r'durationSeconds');
@@ -3063,6 +3177,12 @@ extension RideQueryProperty on QueryBuilder<Ride, Ride, QQueryProperty> {
   QueryBuilder<Ride, double, QQueryOperations> averageSpeedKmhProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'averageSpeedKmh');
+    });
+  }
+
+  QueryBuilder<Ride, int?, QQueryOperations> derivedVersionProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'derivedVersion');
     });
   }
 

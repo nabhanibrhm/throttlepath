@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../core/geo.dart';
+import '../core/track_runs.dart';
 import '../data/database_service.dart';
 import '../data/models/ride.dart';
 import '../data/models/track_point.dart';
@@ -50,9 +51,16 @@ final routeBackfillProvider = FutureProvider.autoDispose<void>((ref) async {
 
 /// The recorded track for a single ride (in capture order), keyed by ride id —
 /// used to replay the route polyline on the detail screen.
+///
+/// Segmented on the way out, so every consumer sees the same track the ride's
+/// stored distance was measured against: cut at blackouts, with any displaced
+/// excursion dropped (see `core/track_runs.dart`). Reading the raw rows here was
+/// how a 3.8 km ride came to draw an 18 km box.
 final rideTrackProvider = FutureProvider.autoDispose
-    .family<List<TrackPoint>, int>((ref, rideId) {
-      return DatabaseService.instance.getTrackPointsForRide(rideId);
+    .family<SegmentedTrack<TrackPoint>, int>((ref, rideId) async {
+      return segmentTrackPoints(
+        await DatabaseService.instance.getTrackPointsForRide(rideId),
+      );
     });
 
 /// A trip paired with its combined stats — what a History trip entry needs to
@@ -92,9 +100,14 @@ final finishedTripsProvider =
 /// One stint (ride) paired with its recorded track — the unit the combined
 /// trip-detail map draws (each stint its own colored polyline).
 class StintTrack {
-  const StintTrack(this.stint, this.track);
+  const StintTrack(this.stint, this.segmented);
   final Ride stint;
-  final List<TrackPoint> track;
+
+  /// Segmented like [rideTrackProvider]: blackout-cut, excursions dropped.
+  final SegmentedTrack<TrackPoint> segmented;
+
+  /// The stint's kept fixes, flattened — for callers that don't draw the joins.
+  List<TrackPoint> get track => segmented.points;
 }
 
 /// A trip's stints (oldest-first) each with its recorded track, keyed by trip id.
@@ -105,7 +118,10 @@ final tripStintsProvider = FutureProvider.autoDispose
   final stints = await db.getStintsForTrip(tripId);
   final out = <StintTrack>[];
   for (final stint in stints) {
-    out.add(StintTrack(stint, await db.getTrackPointsForRide(stint.id)));
+    out.add(StintTrack(
+      stint,
+      segmentTrackPoints(await db.getTrackPointsForRide(stint.id)),
+    ));
   }
   return out;
 });
