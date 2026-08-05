@@ -8,12 +8,55 @@ import '../core/date_format.dart';
 import '../data/database_service.dart';
 import '../data/models/trip.dart';
 import '../services/geocoding_service.dart';
+import '../services/gnss_status.dart';
 import '../services/permission_service.dart';
 import '../services/tracking_service.dart';
 
 /// The app-wide background tracking service.
 final trackingServiceProvider =
     Provider<TrackingService>((ref) => TrackingService.instance);
+
+/// Where receiver reports come from. Overridden in tests.
+final gnssStatusSourceProvider =
+    Provider<GnssStatusSource>((ref) => GnssStatusSource.platform());
+
+/// The single subscription to the receiver, fanned out to every reader.
+///
+/// `autoDispose` is load-bearing, not tidiness: subscribing registers a platform
+/// GNSS status callback, so the receiver is only asked while a widget is actually
+/// showing what it says. Only the acquiring readout and the blackout notice watch
+/// the providers below, and never at the same time.
+///
+/// The fan-out is here rather than in the source because `events()` opens a fresh
+/// platform subscription per call, and the native side keeps exactly one sink —
+/// two readers calling it directly would leave one of them permanently deaf.
+final gnssEventsProvider = Provider.autoDispose<Stream<GnssEvent>>((ref) {
+  final controller = StreamController<GnssEvent>.broadcast();
+  final sub = ref.watch(gnssStatusSourceProvider).events().listen(controller.add);
+  ref.onDispose(() {
+    sub.cancel();
+    controller.close();
+  });
+  return controller.stream;
+});
+
+/// The live GNSS constellation. Loading until the receiver's first report, which
+/// the readouts show as "no constellation data" rather than as a count of zero.
+final gnssStatusProvider = StreamProvider.autoDispose<GnssSnapshot>(
+  (ref) => ref
+      .watch(gnssEventsProvider)
+      .where((e) => e is GnssSnapshot)
+      .cast<GnssSnapshot>(),
+);
+
+/// The receiver's reported time-to-first-fix, once per acquisition. Watched only
+/// so it can be filed into [ttffSamplesProvider] — nothing renders it directly.
+final gnssFirstFixProvider = StreamProvider.autoDispose<GnssFirstFix>(
+  (ref) => ref
+      .watch(gnssEventsProvider)
+      .where((e) => e is GnssFirstFix)
+      .cast<GnssFirstFix>(),
+);
 
 /// One (distance, speed) sample for the live speed-vs-distance chart, captured
 /// per accepted fix while recording. Distance in meters, speed in km/h (metric

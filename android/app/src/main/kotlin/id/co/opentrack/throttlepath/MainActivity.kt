@@ -21,6 +21,11 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
+        // Constellation status for the acquiring readout. Registers itself as an
+        // EventChannel stream handler; it holds no GNSS resources until Dart
+        // subscribes.
+        GnssStatusStreamer(applicationContext, flutterEngine.dartExecutor.binaryMessenger)
+
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler { call, result ->
                 when (call.method) {

@@ -23,6 +23,7 @@ class SettingsService {
   static const _speedGaugeStyleFileName = 'speed_gauge_style.txt';
   static const _countdownFileName = 'countdown_enabled.txt';
   static const _keepScreenOnFileName = 'keep_screen_on.txt';
+  static const _ttffSamplesFileName = 'gnss_ttff.txt';
 
   Future<File> _resolveNamed(String name) async {
     final dir = await getApplicationSupportDirectory();
@@ -106,6 +107,27 @@ class SettingsService {
   /// Persists the keep-screen-on preference. Best-effort.
   Future<void> saveKeepScreenOn(bool enabled) =>
       _saveFlag(_keepScreenOnFileName, enabled);
+
+  /// Recent GNSS time-to-first-fix readings in milliseconds, oldest first.
+  ///
+  /// Not a preference the rider sets — a measurement of their phone. It lives
+  /// here because this is the app's one small-value store, and because it has to
+  /// survive across launches to be worth collecting at all.
+  Future<List<int>> loadTtffSamples() =>
+      _loadTag(_ttffSamplesFileName, _parseTtffSamples, const []);
+
+  /// Persists the sample window. Best-effort, like every other write here: a
+  /// lost sample costs the median a little accuracy and nothing else.
+  Future<void> saveTtffSamples(List<int> samples) =>
+      _saveTag(_ttffSamplesFileName, samples.join(','));
+
+  /// An unparseable entry is dropped rather than failing the whole list — a
+  /// truncated write should cost one sample, not the history.
+  static List<int> _parseTtffSamples(String tag) => tag
+      .split(',')
+      .map((part) => int.tryParse(part.trim()))
+      .whereType<int>()
+      .toList();
 
   /// Shared reader for the boolean prefs. Absent file or unreadable value reads
   /// as false, so every flag defaults to off.

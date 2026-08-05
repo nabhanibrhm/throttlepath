@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/record_view.dart';
 import '../core/speed_gauge_style.dart';
+import '../core/ttff.dart';
 import '../core/units.dart';
 import '../services/settings_service.dart';
 
@@ -144,4 +145,40 @@ class KeepScreenOnController extends StateNotifier<bool> {
 final keepScreenOnProvider =
     StateNotifierProvider<KeepScreenOnController, bool>(
   (ref) => KeepScreenOnController(false),
+);
+
+/// Holds the rolling window of GNSS time-to-first-fix samples.
+///
+/// The one store here that loads itself instead of being seeded from `main()`:
+/// nothing on the first frame reads it, so paying a file read at launch to avoid
+/// a flash there would be paying for nothing. It is asked for the first time a
+/// rider presses START, by which point the read has long landed.
+class TtffSamplesController extends StateNotifier<List<int>> {
+  TtffSamplesController() : super(const []) {
+    _load();
+  }
+
+  Future<void> _load() async {
+    final loaded = await SettingsService.instance.loadTtffSamples();
+    // A lock timed while the read was still in flight is newer than what came
+    // off disk, and dropping it would lose the very sample we just measured.
+    if (state.isEmpty) state = loaded;
+  }
+
+  /// Files one reading from the receiver, dropping the oldest once the window is
+  /// full. Implausible readings are ignored, hence the identity check.
+  Future<void> record(int millis) async {
+    final next = withTtffSample(state, millis);
+    if (identical(next, state)) return;
+    state = next;
+    await SettingsService.instance.saveTtffSamples(next);
+  }
+}
+
+/// Recent time-to-first-fix readings for this phone, oldest first. Empty until
+/// the load lands, and empty forever on a receiver that never reports a first
+/// fix — both of which [typicalTtffLabel] renders as "say nothing".
+final ttffSamplesProvider =
+    StateNotifierProvider<TtffSamplesController, List<int>>(
+  (ref) => TtffSamplesController(),
 );

@@ -16,6 +16,7 @@ import '../providers/stats_providers.dart';
 import '../providers/tracking_providers.dart';
 import '../services/tracking_service.dart' show LiveTelemetry;
 import '../theme/app_theme.dart';
+import 'acquiring_progress.dart';
 import 'analog_speed_gauge.dart';
 import 'live_speed_announcer.dart';
 import 'ride_controls.dart';
@@ -206,6 +207,10 @@ class TelemetrySheet extends StatelessWidget {
           textColor: cx.textBright,
           borderColor: cx.border,
         ),
+        // The pill alone is indefinite — it looks identical at 2 seconds and at
+        // 2 minutes (F9). This line is what separates "working on it" from
+        // "hung".
+        const AcquiringProgress(),
       ];
     }
     return [
@@ -308,18 +313,10 @@ class TelemetrySheet extends StatelessWidget {
           foreground: cx.onAccent,
         ),
         const SizedBox(height: 7),
-        Text(
-          p.paused
-              ? pausedSentence(_t?.pausedFor)
-              : 'Not recording — waiting for GPS',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            color: cx.accentInk,
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            fontFeatures: kTabularFigures,
-          ),
-        ),
+        if (p.paused)
+          _FrozenSentence(text: pausedSentence(_t?.pausedFor))
+        else
+          const _SignalLostSentence(),
       ];
 
   /// Distance + elapsed over one quiet reference line, or — before a ride exists —
@@ -386,6 +383,55 @@ class TelemetrySheet extends StatelessWidget {
     );
   }
 
+}
+
+/// The one line under a PAUSED / GPS SIGNAL LOST pill, in the accent ink that
+/// ties it to the pill and the hazard rail above.
+class _FrozenSentence extends StatelessWidget {
+  const _FrozenSentence({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final cx = AppColors.of(context);
+    return Text(
+      text,
+      textAlign: TextAlign.center,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        color: cx.accentInk,
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+        fontFeatures: kTabularFigures,
+      ),
+    );
+  }
+}
+
+/// The blackout sentence, with the constellation behind it.
+///
+/// "Not recording — 2 of 9 satellites" says the sky is still there and the
+/// receiver simply cannot resolve a position; no report at all says the receiver
+/// itself has gone quiet. Without that distinction a blackout gives the rider no
+/// way to tell a tunnel from a hung app — the same complaint F9 raised about the
+/// acquiring pill, in the one place it matters more, because here a ride is
+/// already running.
+///
+/// A [ConsumerWidget] on purpose: [gnssStatusProvider] is `autoDispose`, so the
+/// platform GNSS callback is registered for the length of the blackout and not a
+/// second longer.
+class _SignalLostSentence extends ConsumerWidget {
+  const _SignalLostSentence();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final gnss = ref.watch(gnssStatusProvider).valueOrNull;
+    return _FrozenSentence(
+      text: 'Not recording — ${gnss?.satellitePhrase ?? 'waiting for GPS'}',
+    );
+  }
 }
 
 /// Pill button used in the telemetry sheet (start / pause / resume). A solid
