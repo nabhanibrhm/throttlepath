@@ -113,9 +113,14 @@ class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
       ),
       body: Column(
         children: [
-          // Fixed map header (mockup), then the stats scroll beneath it.
+          // Fixed map header, then the stats scroll beneath it.
+          //
+          // 356, not 320: the speed legend left the map's corner for a row of its
+          // own underneath (spec 7.2), and an overlay costs no layout space while
+          // a row does. The extra 36 is that row — so the map keeps the height it
+          // always had instead of paying for the legend's promotion.
           SizedBox(
-            height: 320,
+            height: 356,
             child: trackAsync.when(
               loading: () => Center(
                 child: CircularProgressIndicator(color: cx.accentInk),
@@ -288,24 +293,22 @@ class _SummaryPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cx = AppColors.of(context);
+    final t = Theme.of(context).textTheme;
     return Container(
       width: double.infinity,
       color: cx.canvas,
-      padding: const EdgeInsets.fromLTRB(22, 24, 22, 8),
+      padding: const EdgeInsets.fromLTRB(kRowGutter, 18, kRowGutter, 8),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            _formatDate(ride.startTime),
-            style: TextStyle(color: cx.textDim, fontSize: 13),
-          ),
+          Text(_formatDate(ride.startTime), style: t.bodySmall),
           if (PlaceRouteLabel.label(ride.startPlace, ride.endPlace) != null) ...[
-            const SizedBox(height: 6),
+            const SizedBox(height: 5),
             PlaceRouteLabel(
               startPlace: ride.startPlace,
               endPlace: ride.endPlace,
-              fontSize: 14,
+              fontSize: 13,
             ),
           ],
           const SizedBox(height: 6),
@@ -317,49 +320,44 @@ class _SummaryPanel extends StatelessWidget {
                 unit
                     .distanceMeters(ride.totalDistanceMeters)
                     .toStringAsFixed(2),
-                style: TextStyle(
-                  color: cx.textBright,
-                  fontSize: 44,
-                  height: 1,
-                  fontWeight: FontWeight.w800,
-                  fontFeatures: kTabularFigures,
-                ),
+                style: t.displayMedium,
               ),
               const SizedBox(width: 6),
               Padding(
                 padding: const EdgeInsets.only(bottom: 6),
                 child: Text(
                   unit.distanceLabel,
-                  style: TextStyle(color: cx.textDim, fontSize: 16),
+                  style: TextStyle(color: cx.textDim, fontSize: 14),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 32),
+          const SizedBox(height: 22),
+          // One 4-up row, not two rows of two (spec 7.5). Nothing was duplicated
+          // here — the spec's "delete the repeated pair" was reading a screenshot,
+          // and there was only ever one stat block — but at two rows the four
+          // figures took 100dp of a screen whose point is the chart below them,
+          // and each row of two left half the width empty. Units move into the
+          // labels so the values line up as bare numbers.
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _Stat(
-                label: 'TOTAL TIME',
+                label: 'TOTAL',
                 value: formatDuration(ride.durationSeconds),
+                first: true,
               ),
               _Stat(
-                label: 'MOVING TIME',
+                label: 'MOVING',
                 value: formatDuration(ride.movingSeconds),
               ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          Row(
-            children: [
               _Stat(
-                label: 'AVG SPEED',
-                value: unit.speed(ride.averageSpeedKmh).toStringAsFixed(1),
-                unit: unit.speedLabel,
+                label: 'AVG ${unit.speedLabel}',
+                value: unit.speed(ride.averageSpeedKmh).toStringAsFixed(0),
               ),
               _Stat(
-                label: 'PEAK SPEED',
-                value: unit.speed(ride.maxSpeedKmh).toStringAsFixed(1),
-                unit: unit.speedLabel,
+                label: 'PEAK ${unit.speedLabel}',
+                value: unit.speed(ride.maxSpeedKmh).toStringAsFixed(0),
                 color: cx.peak,
               ),
             ],
@@ -694,55 +692,56 @@ class _SpeedChartTab extends StatelessWidget {
   }
 }
 
+/// One cell of the 4-up stat row: a label over a value, divided from its
+/// neighbour by a hairline rather than by whitespace.
+///
+/// The rule is what makes four cells across a 353dp phone read as four things
+/// instead of one run of numbers. The [first] cell's rule is transparent — a line
+/// at the screen edge divides nothing.
 class _Stat extends StatelessWidget {
   const _Stat({
     required this.label,
     required this.value,
-    this.unit = '',
     this.color,
+    this.first = false,
   });
 
   final String label;
   final String value;
-  final String unit;
   final Color? color;
+  final bool first;
 
   @override
   Widget build(BuildContext context) {
     final cx = AppColors.of(context);
+    final t = Theme.of(context).textTheme;
     return Expanded(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: TextStyle(color: cx.textTertiary, fontSize: kMinFontSize),
+      child: Container(
+        decoration: BoxDecoration(
+          border: Border(
+            left: BorderSide(color: first ? Colors.transparent : cx.border),
           ),
-          const SizedBox(height: 6),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text(
-                value,
-                style: TextStyle(
-                  color: color ?? cx.textBright,
-                  fontSize: 24,
-                  fontWeight: FontWeight.w700,
-                  fontFeatures: kTabularFigures,
-                ),
-              ),
-              if (unit.isNotEmpty) ...[
-                const SizedBox(width: 4),
-                Text(
-                  unit,
-                  style:
-                      TextStyle(color: cx.textDim, fontSize: kMinFontSize),
-                ),
-              ],
-            ],
-          ),
-        ],
+        ),
+        padding: EdgeInsets.only(left: first ? 0 : 11, right: 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              // Tighter tracking than a section heading: four of these share one
+              // row, and "PEAK km/h" is the widest thing in it.
+              style: t.labelSmall!.copyWith(letterSpacing: 0.4),
+            ),
+            const SizedBox(height: 5),
+            Text(
+              value,
+              maxLines: 1,
+              style: t.headlineSmall!.copyWith(color: color ?? cx.peak),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -39,23 +39,20 @@ class PlaceRouteLabel extends StatelessWidget {
     final text = label(startPlace, endPlace);
     if (text == null) return const SizedBox.shrink();
     final cx = AppColors.of(context);
-    return Row(
-      children: [
-        Icon(Icons.place_outlined, size: fontSize + 2, color: cx.accentInk),
-        const SizedBox(width: 4),
-        Expanded(
-          child: Text(
-            text,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: cx.textDim,
-              fontSize: fontSize,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ),
-      ],
+    // No pin icon (spec 7.4). "A → B" already reads as a place, and an amber
+    // glyph in front of it was both the loudest thing on the line and a second
+    // amber on a screen whose accent belongs to the distance. It also left the
+    // History rows — which drop the pin — and this screen disagreeing about how
+    // the same string is drawn.
+    return Text(
+      text,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        color: cx.textDim,
+        fontSize: fontSize,
+        fontWeight: FontWeight.w500,
+      ),
     );
   }
 }

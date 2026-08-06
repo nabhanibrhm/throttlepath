@@ -60,49 +60,59 @@ class RouteMapView extends StatelessWidget {
         ..._speedSegments(route, speeds, maxSpeed, run.from, run.to),
     ];
 
-    return Stack(
+    // Map, then the legend as a real row beneath it (spec 7.2). It used to float
+    // in the map's bottom-left corner, where it sat on top of whatever road
+    // happened to be there and needed a translucent panel and a border to stay
+    // readable — chrome that existed only because of where it was. Below the map
+    // it needs none of that, and it stops covering part of the route it explains.
+    //
+    // Both the inline detail map and `FullScreenRouteMap` render through this one
+    // widget, so this moves the legend in both at once.
+    return Column(
       children: [
-        FlutterMap(
-          options: MapOptions(
-            backgroundColor: cx.canvas,
-            initialCenter: route.first,
-            initialZoom: 15,
-            // Fit the whole recorded route in view. A single-point ride keeps
-            // the initialCenter/zoom above (coordinates fit needs >= 2).
-            initialCameraFit: route.length >= 2
-                ? CameraFit.coordinates(
-                    coordinates: route,
-                    padding: EdgeInsets.all(padding),
-                    maxZoom: maxZoom,
-                  )
-                : null,
-            interactionOptions: const InteractionOptions(
-              flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
-            ),
+        Expanded(
+          child: Stack(
+            children: [
+              FlutterMap(
+                options: MapOptions(
+                  backgroundColor: cx.canvas,
+                  initialCenter: route.first,
+                  initialZoom: 15,
+                  // Fit the whole recorded route in view. A single-point ride
+                  // keeps the initialCenter/zoom above (a coordinates fit needs
+                  // >= 2).
+                  initialCameraFit: route.length >= 2
+                      ? CameraFit.coordinates(
+                          coordinates: route,
+                          padding: EdgeInsets.all(padding),
+                          maxZoom: maxZoom,
+                        )
+                      : null,
+                  interactionOptions: const InteractionOptions(
+                    flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+                  ),
+                ),
+                children: [
+                  TileLayer(
+                    urlTemplate: basemapUrl(cx.isDark),
+                    subdomains: const ['a', 'b', 'c', 'd'],
+                    userAgentPackageName: 'id.co.opentrack.throttlepath',
+                    tileProvider: NetworkTileProvider(silenceExceptions: true),
+                  ),
+                  if (segments.isNotEmpty) PolylineLayer(polylines: segments),
+                  MarkerLayer(
+                    markers: [
+                      _endpointMarker(route.first, cx.accent), // start
+                      if (route.length >= 2)
+                        _endpointMarker(route.last, cx.danger), // end
+                    ],
+                  ),
+                ],
+              ),
+            ],
           ),
-          children: [
-            TileLayer(
-              urlTemplate: basemapUrl(cx.isDark),
-              subdomains: const ['a', 'b', 'c', 'd'],
-              userAgentPackageName: 'id.co.opentrack.throttlepath',
-              tileProvider: NetworkTileProvider(silenceExceptions: true),
-            ),
-            if (segments.isNotEmpty) PolylineLayer(polylines: segments),
-            MarkerLayer(
-              markers: [
-                _endpointMarker(route.first, cx.accent), // start
-                if (route.length >= 2)
-                  _endpointMarker(route.last, cx.danger), // end
-              ],
-            ),
-          ],
         ),
-        if (maxSpeed > 0)
-          Positioned(
-            left: 12,
-            bottom: 12,
-            child: SpeedLegend(maxSpeedKmh: maxSpeed, unit: unit),
-          ),
+        if (maxSpeed > 0) SpeedLegendRow(maxSpeedKmh: maxSpeed, unit: unit),
       ],
     );
   }
@@ -205,11 +215,17 @@ class RouteMapView extends StatelessWidget {
 /// Gradient scale explaining the speed-colored route: a Turbo bar from 0 to the
 /// ride's max speed, in the rider's chosen unit.
 ///
-/// Carries **numeric ticks** at the quarter points (F30). Two end labels told the
-/// rider the range but left every colour in between unreadable — the whole point
-/// of colouring the route is to read a speed off it.
-class SpeedLegend extends StatelessWidget {
-  const SpeedLegend({
+/// **One row beneath the map** (spec 7.2), not a floating panel on it. As an
+/// overlay it needed a translucent fill and a border to survive whatever was
+/// under it, and it covered a corner of the route it was there to explain. On the
+/// flat canvas it needs neither, and the row it occupies is 36dp the map gives
+/// back rather than 36dp the map loses.
+///
+/// The range still reads as `0 – 81` rather than three separate tick numbers: a
+/// horizontal bar spanning the full width has no room for stacked tick labels,
+/// and the ends are what a rider checks — "is the red on this route 80 or 140?".
+class SpeedLegendRow extends StatelessWidget {
+  const SpeedLegendRow({
     super.key,
     required this.maxSpeedKmh,
     required this.unit,
@@ -218,80 +234,48 @@ class SpeedLegend extends StatelessWidget {
   final double maxSpeedKmh;
   final SpeedUnit unit;
 
-  static const double _barWidth = 132;
-
   @override
   Widget build(BuildContext context) {
     final cx = AppColors.of(context);
-    final labelStyle = TextStyle(
-      color: cx.textBright,
-      fontSize: kMinFontSize,
-      fontWeight: FontWeight.w600,
-      fontFeatures: kTabularFigures,
-    );
+    final t = Theme.of(context).textTheme;
     final top = unit.speed(maxSpeedKmh);
-    final ticks = [0.0, top / 2, top];
 
     return Semantics(
       label: 'Route colour scale, 0 to ${top.toStringAsFixed(0)} '
           '${unit.speedLabel}',
+      // One label for the whole strip: a gradient bar and two numbers announced
+      // separately would be three fragments describing one scale.
       child: ExcludeSemantics(
         child: Container(
-          padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
-          decoration: BoxDecoration(
-            color: cx.surface.withValues(alpha: 0.88),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: cx.border),
+          padding: const EdgeInsets.symmetric(
+            horizontal: kRowGutter,
+            vertical: 10,
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+          decoration: BoxDecoration(
+            color: cx.canvas,
+            border: Border(bottom: BorderSide(color: cx.border)),
+          ),
+          child: Row(
             children: [
               Text(
-                'SPEED (${unit.speedLabel})',
-                style: TextStyle(
-                  color: cx.textTertiary,
-                  fontSize: kMinFontSize,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1,
-                ),
+                'SPEED ${unit.speedLabel}',
+                style: t.labelSmall!.copyWith(letterSpacing: 0.8),
               ),
-              const SizedBox(height: 4),
-              Container(
-                width: _barWidth,
-                height: 7,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(4),
-                  gradient: LinearGradient(
-                    colors: SpeedPalette.gradient,
-                    stops: SpeedPalette.gradientStops,
+              const SizedBox(width: 10),
+              Expanded(
+                child: Container(
+                  height: 3,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(2),
+                    gradient: LinearGradient(
+                      colors: SpeedPalette.gradient,
+                      stops: SpeedPalette.gradientStops,
+                    ),
                   ),
                 ),
               ),
-              // Tick marks, so a colour in the middle of the bar can be read
-              // against a number rather than guessed at.
-              SizedBox(
-                width: _barWidth,
-                height: 4,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    for (var i = 0; i < ticks.length; i++)
-                      Container(width: 1, height: 4, color: cx.border),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 1),
-              SizedBox(
-                width: _barWidth,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    for (final t in ticks)
-                      Text(t.toStringAsFixed(0), style: labelStyle),
-                  ],
-                ),
-              ),
+              const SizedBox(width: 10),
+              Text('0 – ${top.toStringAsFixed(0)}', style: t.bodySmall),
             ],
           ),
         ),

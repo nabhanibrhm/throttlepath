@@ -21,12 +21,23 @@ enum SpeedGaugeStyle {
         _ => SpeedGaugeStyle.digital,
       };
 
-  /// Human label, shared by the Record-screen switcher and its Settings mirror.
+  /// Human label, used by the Settings row and spoken by both surfaces.
   ///
   /// "Dial" / "Number" rather than "Analog" / "Digital": the rider is picking a
-  /// shape, not a technology, and the shorter words fit a segmented control.
+  /// shape, not a technology.
   String get label => switch (this) {
         SpeedGaugeStyle.digital => 'Number',
+        SpeedGaugeStyle.analog => 'Dial',
+      };
+
+  /// The compact form for the Record screen's toolbar row, where this sits beside
+  /// four glyphs and has to cost about as little width as they do.
+  ///
+  /// Lives here rather than in the widget so the two surfaces still have exactly
+  /// one place that decides what these styles are called — the long form and the
+  /// short form of one name, not two names.
+  String get shortLabel => switch (this) {
+        SpeedGaugeStyle.digital => '123',
         SpeedGaugeStyle.analog => 'Dial',
       };
 

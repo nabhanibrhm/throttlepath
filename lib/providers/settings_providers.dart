@@ -30,6 +30,15 @@ String themeModeLabel(ThemeMode mode) => switch (mode) {
       ThemeMode.dark => 'Dark',
     };
 
+/// Glyph for a theme mode, beside [themeModeLabel] for the same reason: the
+/// Settings row and the picker sheet both draw it, and a mode that looked like
+/// the sun in one place and a moon in the other would be worse than no icon.
+IconData themeModeIcon(ThemeMode mode) => switch (mode) {
+      ThemeMode.system => Icons.brightness_auto_outlined,
+      ThemeMode.light => Icons.light_mode_outlined,
+      ThemeMode.dark => Icons.dark_mode_outlined,
+    };
+
 /// The app's theme mode. Seeded in `main()` (via override) with the persisted
 /// value so there is no theme flash on launch.
 final themeModeProvider =

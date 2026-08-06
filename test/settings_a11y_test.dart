@@ -147,18 +147,29 @@ void main() {
     });
   });
 
+  // The three-up segmented control moved into a sheet (spec 8.4), so all three of
+  // these now have to open it first. The *properties* being asserted are
+  // unchanged — three reachable modes, System actually selectable and storable,
+  // and the current one marked selected to a screen reader — because those are
+  // what the original bug was about, not where the control happened to live.
   group('theme', () {
     testWidgets('is a three-way choice, not a dark-mode switch', (t) async {
       useDeviceSurface(t);
       await t.pumpWidget(host());
       await t.pumpAndSettle();
 
+      // The row itself shows only the current value; it is no longer the control.
       expect(find.text('Theme'), findsOneWidget);
       expect(find.text('Dark mode'), findsNothing);
+      expect(find.byType(Switch), findsNWidgets(2)); // countdown + screen-on
+
+      await t.tap(find.text('Theme'));
+      await t.pumpAndSettle();
+
       expect(find.text('System'), findsOneWidget);
       expect(find.text('Light'), findsOneWidget);
-      expect(find.text('Dark'), findsOneWidget);
-      expect(find.byType(Switch), findsNWidgets(2)); // countdown + screen-on
+      // Two: the sheet's option plus the row's own value behind it.
+      expect(find.text('Dark'), findsNWidgets(2));
     });
 
     testWidgets('System is reachable and actually selectable', (t) async {
@@ -179,21 +190,30 @@ void main() {
       await t.pumpAndSettle();
 
       expect(container.read(themeModeProvider), ThemeMode.dark);
+
+      await t.tap(find.text('Theme'));
+      await t.pumpAndSettle();
       await t.tap(find.text('System'));
       await t.pumpAndSettle();
       // This is the state loadThemeMode used to silently collapse into dark.
       expect(container.read(themeModeProvider), ThemeMode.system);
+      // Selecting closes the sheet — one tap, not select-then-confirm.
+      expect(find.text('Light'), findsNothing);
 
+      await t.tap(find.text('Theme'));
+      await t.pumpAndSettle();
       await t.tap(find.text('Light'));
       await t.pumpAndSettle();
       expect(container.read(themeModeProvider), ThemeMode.light);
     });
 
-    testWidgets('the selected segment is marked selected for screen readers',
+    testWidgets('the selected mode is marked selected for screen readers',
         (t) async {
       useDeviceSurface(t);
       final semantics = t.ensureSemantics();
       await t.pumpWidget(host(mode: ThemeMode.light));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Theme'));
       await t.pumpAndSettle();
 
       expect(
@@ -209,6 +229,28 @@ void main() {
         ),
       );
       semantics.dispose();
+    });
+
+    testWidgets('no row carries a decorative icon tile any more', (t) async {
+      useTallSurface(t);
+      await t.pumpWidget(host());
+      await t.pumpAndSettle();
+
+      // G5: every row used to *lead* with a 36dp amber-tinted square. Eight of
+      // them down the left edge spent the accent on decoration, and none told a
+      // rider anything the label didn't.
+      //
+      // Asserted positionally rather than by count, because the icons that
+      // legitimately remain — the share and refresh glyphs on the two action
+      // rows — are trailing affordances saying "this row does something". What
+      // must never come back is an icon in the *leading* slot, so every icon in
+      // the list has to sit in the row's trailing half.
+      final icons = find.byType(Icon);
+      expect(icons, findsWidgets);
+      for (var i = 0; i < icons.evaluate().length; i++) {
+        expect(t.getTopLeft(icons.at(i)).dx, greaterThan(176),
+            reason: 'an icon is back in the leading tile position');
+      }
     });
   });
 

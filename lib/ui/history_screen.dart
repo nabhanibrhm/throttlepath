@@ -12,19 +12,25 @@ import '../providers/home_providers.dart';
 import '../providers/settings_providers.dart';
 import '../providers/stats_providers.dart';
 import '../providers/tracking_providers.dart';
-import '../services/route_derivation.dart' show kRouteMinDistanceMeters;
 import '../theme/app_theme.dart';
+import 'hairline_row.dart';
 import 'place_route_label.dart';
 import 'ride_detail_screen.dart';
-import 'route_sparkline.dart';
 import 'trip_detail_screen.dart';
 import 'week_strip.dart';
 
 /// The rides list: this week's totals above a searchable, month-grouped history.
 ///
-/// Each row leads with the name, then the distance, then the *shape* of the route
-/// — a rider recognises a ride from its outline long before they read its stats
-/// (F20). Trips render as a bracketed parent with their stints nested beneath (F21).
+/// Each row leads with the name, then the place, then one metadata line, with the
+/// distance right-aligned on a shared axis so the distances read as a scannable
+/// column (spec 6.3). Rows are separated by a hairline rather than enclosed in
+/// cards — see [HairlineRow] for why. Trips render as one row that expands to
+/// show its stints (F21).
+///
+/// The route sparkline that used to sit in every row is gone (spec 6.1): it cost
+/// ~60dp of vertical space per row, which is most of a row, and a route's shape
+/// is what the detail screen and the share card are for. [RouteSparkline] itself
+/// stays — the post-ride summary still uses it.
 class HistoryScreen extends ConsumerStatefulWidget {
   const HistoryScreen({super.key});
 
@@ -37,12 +43,17 @@ const Duration _kUndoWindow = Duration(seconds: 6);
 
 /// Collapsed toolbar height, and the room the week strip gets above it.
 ///
-/// Measured on the device, the strip comes to ~92dp in Inter (label row + 34sp
-/// hero + the rides/moving line + 28dp of padding); this reserves a little more.
-/// It is *not* imposed on the strip — see `_appBar` — so a larger system text
-/// scale clips at the bottom instead of throwing an overflow.
+/// The strip lost its card in the minimal pass, so it is two plain lines now —
+/// a 30sp figure plus a 12sp sentence, ~60dp in Inter; this reserves a little
+/// more. It is *not* imposed on the strip — see `_appBar` — so a larger system
+/// text scale clips at the bottom instead of throwing an overflow.
 const double _kToolbarHeight = 56;
-const double _kStripHeight = 104;
+const double _kStripHeight = 70;
+
+/// The width every row's distance is right-aligned within, so the figures form a
+/// column the eye can run down instead of landing wherever each name ended
+/// (spec 6.3). Wide enough for "187.65" plus its unit at 18sp.
+const double _kDistanceColumnWidth = 78;
 
 /// What the filter chips select.
 enum _Filter {
@@ -71,10 +82,6 @@ typedef _ListModel = ({
   List<_Entry> visible,
   List<_MonthGroup> groups,
   Map<_Filter, int> counts,
-
-  /// Whether a search or a non-`all` chip is narrowing the list — decides whether
-  /// the running-total line is worth showing.
-  bool filtering,
 });
 
 class _HistoryScreenState extends ConsumerState<HistoryScreen> {
@@ -199,7 +206,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
         if (_searching)
           SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              padding: const EdgeInsets.fromLTRB(kRowGutter, 12, kRowGutter, 0),
               child: _SearchField(
                 controller: _search,
                 onChanged: (_) => setState(() {}),
@@ -212,7 +219,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
           ),
         SliverToBoxAdapter(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            padding: const EdgeInsets.fromLTRB(kRowGutter, 12, kRowGutter, 4),
             child: _FilterRow(
               selected: _filter,
               counts: model.counts,
@@ -220,17 +227,10 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
             ),
           ),
         ),
-        if (model.filtering)
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              child: _ResultLine(entries: model.visible, unit: unit),
-            ),
-          ),
         for (final t in openTrips)
           SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              padding: const EdgeInsets.fromLTRB(kRowGutter, 12, kRowGutter, 0),
               child: _OpenTripCard(
                 summary: t,
                 unit: unit,
@@ -242,7 +242,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
         if (model.visible.isEmpty)
           SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 40, 16, 40),
+              padding: const EdgeInsets.fromLTRB(kRowGutter, 40, kRowGutter, 40),
               child: Text(
                 model.query.isEmpty
                     ? 'Nothing filed under ${_filter.label.toLowerCase()}.'
@@ -255,16 +255,13 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
         for (final group in model.groups)
           SliverList(
             delegate: SliverChildListDelegate([
-              _MonthHeader(
+              SectionLabel(
                 label: group.label,
-                meters: group.meters,
-                unit: unit,
+                trailing: '${unit.distanceMeters(group.meters)
+                    .toStringAsFixed(0)} ${unit.distanceLabel}',
               ),
               for (final entry in group.entries)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                  child: _entryCard(entry, unit, model.query),
-                ),
+                _entryRow(entry, unit, model.query),
             ]),
           ),
         const SliverToBoxAdapter(child: SizedBox(height: 24)),
@@ -302,20 +299,19 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
       counts: {
         for (final f in _Filter.values) f: matched.where(f.accepts).length,
       },
-      filtering: query.isNotEmpty || _filter != _Filter.all,
     );
   }
 
-  Widget _entryCard(_Entry entry, SpeedUnit unit, String query) =>
+  Widget _entryRow(_Entry entry, SpeedUnit unit, String query) =>
       switch (entry) {
-        _RideEntry(:final ride) => _RideCard(
+        _RideEntry(:final ride) => _RideRow(
             ride: ride,
             unit: unit,
             query: query,
             onTap: () => _openRide(ride),
             onDelete: () => _deleteWithUndo(ride),
           ),
-        _TripEntry(:final summary) => _TripCard(
+        _TripEntry(:final summary) => _TripRow(
             summary: summary,
             unit: unit,
             query: query,
@@ -372,8 +368,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
               // loose, so the strip is whatever tall it needs to be and the
               // Stack's hard clip trims it rather than a RenderFlex overflowing.
               Positioned(
-                left: 16,
-                right: 16,
+                left: kRowGutter,
+                right: kRowGutter,
                 top: top + _kToolbarHeight,
                 child: Opacity(
                   opacity: t,
@@ -384,20 +380,13 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                 ),
               ),
               Positioned(
-                left: 16,
+                left: kRowGutter,
                 right: 4,
                 top: top,
                 height: _kToolbarHeight,
                 child: Row(
                   children: [
-                    Text(
-                      'Rides',
-                      style: TextStyle(
-                        color: cx.textBright,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
+                    Text('Rides', style: Theme.of(context).textTheme.titleLarge),
                     // Only once the strip is out of the way — the same figure
                     // twice, 20dp apart, reads as a rendering bug.
                     if (t < 0.35) ...[
@@ -609,13 +598,18 @@ class _FilterRow extends StatelessWidget {
           final f = _Filter.values[i];
           final on = f == selected;
           final count = counts[f] ?? 0;
+          final ink =
+              on ? cx.onAccent : (count == 0 ? cx.textTertiary : cx.textBright);
           return Semantics(
             button: true,
             selected: on,
             label: '${f.label}, $count',
             child: ExcludeSemantics(
               child: Material(
-                color: on ? cx.accent : cx.surface,
+                // Unselected chips go transparent-on-outline (spec 5.3): a row
+                // of four filled chips reads as four buttons, when only one of
+                // them is on.
+                color: on ? cx.accent : Colors.transparent,
                 borderRadius: BorderRadius.circular(999),
                 child: InkWell(
                   // A chip that would empty the list is not a filter, it's a
@@ -624,18 +618,30 @@ class _FilterRow extends StatelessWidget {
                   onTap: count == 0 && !on ? null : () => onSelect(f),
                   borderRadius: BorderRadius.circular(999),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(999),
                       border: Border.all(color: on ? cx.accent : cx.border),
                     ),
-                    child: Text(
-                      '${f.label}  $count',
+                    child: Text.rich(
+                      TextSpan(
+                        text: f.label,
+                        children: [
+                          // The count is the chip's supporting detail, not half
+                          // its label — it steps down in weight and opacity so
+                          // "Rides" still reads as the word being tapped.
+                          TextSpan(
+                            text: '  $count',
+                            style: TextStyle(
+                              color: ink.withValues(alpha: 0.6),
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
                       style: TextStyle(
-                        color: on
-                            ? cx.onAccent
-                            : (count == 0 ? cx.textTertiary : cx.textBright),
+                        color: ink,
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
                         fontFeatures: kTabularFigures,
@@ -652,78 +658,13 @@ class _FilterRow extends StatelessWidget {
   }
 }
 
-/// "7 entries · 214.6 km" — the running total for whatever the filters left, so a
-/// search doubles as an ad-hoc report ("how far did I ride to Lembang?").
-class _ResultLine extends StatelessWidget {
-  const _ResultLine({required this.entries, required this.unit});
-
-  final List<_Entry> entries;
-  final SpeedUnit unit;
-
-  @override
-  Widget build(BuildContext context) {
-    final cx = AppColors.of(context);
-    final meters =
-        entries.fold<double>(0, (sum, e) => sum + e.distanceMeters);
-    final label = entries.length == 1 ? '1 result' : '${entries.length} results';
-    return Text(
-      entries.isEmpty
-          ? 'No results'
-          : '$label · ${unit.distanceMeters(meters).toStringAsFixed(1)} ${unit.distanceLabel}',
-      style: TextStyle(
-        color: cx.textDim,
-        fontSize: 13,
-        fontWeight: FontWeight.w600,
-        fontFeatures: kTabularFigures,
-      ),
-    );
-  }
-}
-
-class _MonthHeader extends StatelessWidget {
-  const _MonthHeader({
-    required this.label,
-    required this.meters,
-    required this.unit,
-  });
-
-  final String label;
-  final double meters;
-  final SpeedUnit unit;
-
-  @override
-  Widget build(BuildContext context) {
-    final cx = AppColors.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 10),
-      child: Row(
-        children: [
-          Text(
-            label.toUpperCase(),
-            style: TextStyle(
-              color: cx.textTertiary,
-              fontSize: kMinFontSize,
-              letterSpacing: 1.4,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(child: Divider(color: cx.border, height: 1)),
-          const SizedBox(width: 10),
-          Text(
-            '${unit.distanceMeters(meters).toStringAsFixed(0)} ${unit.distanceLabel}',
-            style: TextStyle(
-              color: cx.textDim,
-              fontSize: kMinFontSize,
-              fontWeight: FontWeight.w600,
-              fontFeatures: kTabularFigures,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
+// The running-total line that used to sit under the chips ("7 results · 214.6
+// km") is gone (spec 5.2) — every chip already carries its own count, and the
+// line restated the selected one directly beneath it. The month headers still
+// carry per-month totals, so the arithmetic didn't leave with it.
+//
+// `_MonthHeader` is gone too: it was `SectionLabel` with different padding, and
+// now that Settings needs the same shape it lives in `hairline_row.dart`.
 
 class _EmptyState extends StatelessWidget {
   const _EmptyState();
@@ -850,14 +791,61 @@ class _OpenTripCard extends StatelessWidget {
   }
 }
 
-/// A saved ride: name, distance, the route's shape, then one quiet metrics line.
+/// The distance every row is read by, right-aligned inside a fixed column so the
+/// figures line up down the list (spec 6.3).
+///
+/// Neutral, not amber: with one of these on every row the amber stopped pointing
+/// at anything (G2). The screen's single accent is the week total up top.
+class _DistanceBlock extends StatelessWidget {
+  const _DistanceBlock({
+    required this.meters,
+    required this.unit,
+    this.style,
+  });
+
+  final double meters;
+  final SpeedUnit unit;
+
+  /// Overridden by nested stints, which sit a step down from their parent.
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    final cx = AppColors.of(context);
+    final t = Theme.of(context).textTheme;
+    return SizedBox(
+      width: _kDistanceColumnWidth,
+      child: Text.rich(
+        TextSpan(
+          text: unit.distanceMeters(meters).toStringAsFixed(2),
+          children: [
+            TextSpan(
+              text: ' ${unit.distanceLabel}',
+              style: TextStyle(
+                color: cx.textDim,
+                fontSize: kMinFontSize,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+        textAlign: TextAlign.right,
+        maxLines: 1,
+        style: style ?? t.headlineSmall!.copyWith(color: cx.textBright),
+      ),
+    );
+  }
+}
+
+/// A saved ride: name, place, one metadata line, and the distance on the shared
+/// right-hand axis.
 ///
 /// The old card gave name, date, distance and a four-column stat grid all
 /// competing at the same weight, and painted PEAK in red on every single row
-/// (F20). Now there is one thing to read first, one picture to recognise it by,
-/// and the numbers wait until asked for.
-class _RideCard extends StatelessWidget {
-  const _RideCard({
+/// (F20). The redesign takes one more thing away — the route sparkline, which was
+/// costing ~56dp per row for a shape the detail screen shows properly (spec 6.1).
+class _RideRow extends StatelessWidget {
+  const _RideRow({
     required this.ride,
     required this.unit,
     required this.query,
@@ -876,9 +864,9 @@ class _RideCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cx = AppColors.of(context);
-    final name = ride.name?.trim().isNotEmpty == true
-        ? ride.name!.trim()
-        : 'Untitled ride';
+    final t = Theme.of(context).textTheme;
+    final named = ride.name?.trim().isNotEmpty == true;
+    final name = named ? ride.name!.trim() : 'Untitled ride';
     final routeLabel = PlaceRouteLabel.label(ride.startPlace, ride.endPlace);
 
     return Dismissible(
@@ -888,13 +876,12 @@ class _RideCard extends StatelessWidget {
       // safety net. A modal on every swipe made deleting slower than the mistake
       // it was guarding against (F23).
       onDismissed: (_) => onDelete(),
+      // Square and full-bleed now that the row it reveals is too — a rounded
+      // background behind a square row shows its corners through the gap.
       background: Container(
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 20),
-        decoration: BoxDecoration(
-          color: cx.danger.withValues(alpha: 0.18),
-          borderRadius: BorderRadius.circular(16),
-        ),
+        color: cx.danger.withValues(alpha: 0.18),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -913,115 +900,90 @@ class _RideCard extends StatelessWidget {
           ],
         ),
       ),
-      child: Material(
-        color: cx.surface,
-        borderRadius: BorderRadius.circular(16),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(16),
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: cx.border),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: _Highlighted(
-                        text: name,
-                        query: query,
-                        style: TextStyle(
-                          color: cx.textBright,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
+      child: HairlineRow(
+        onTap: onTap,
+        // Matches the trip row, whose chevron is a real 44dp control — so the
+        // distance column lands on the same axis in both and the figures line up
+        // down a mixed list.
+        trailingGutter: 0,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _Highlighted(
+                    text: name,
+                    query: query,
+                    // An untitled ride is dimmed rather than given its own
+                    // wording or badge — the absence *is* the information, and
+                    // it should not shout louder than a name someone chose.
+                    style: t.titleMedium!.copyWith(
+                      color: named ? cx.textBright : cx.textDim,
                     ),
-                    const SizedBox(width: 8),
-                    Text.rich(
-                      TextSpan(
-                        text: unit
-                            .distanceMeters(ride.totalDistanceMeters)
-                            .toStringAsFixed(2),
-                        style: TextStyle(
-                          color: cx.accentInk,
-                          fontSize: 22,
-                          height: 1.1,
-                          fontWeight: FontWeight.w800,
-                          fontFeatures: kTabularFigures,
-                        ),
-                        children: [
-                          TextSpan(
-                            text: ' ${unit.distanceLabel}',
-                            style: TextStyle(
-                              color: cx.textDim,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
+                  ),
+                  if (routeLabel != null) ...[
+                    const SizedBox(height: 3),
+                    _Highlighted(
+                      text: routeLabel,
+                      query: query,
+                      // The pin icon went with the card: at 14px beside 12px
+                      // text it was the loudest thing in the row, and "A → B"
+                      // already reads as a place without one.
+                      style: t.bodySmall!.copyWith(color: cx.textDim),
                     ),
                   ],
-                ),
-                if (routeLabel != null) ...[
-                  const SizedBox(height: 5),
-                  Row(
-                    children: [
-                      Icon(Icons.place_outlined, size: 14, color: cx.accentInk),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: _Highlighted(
-                          text: routeLabel,
-                          query: query,
-                          style: TextStyle(
-                            color: cx.textDim,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                    ],
+                  const SizedBox(height: 3),
+                  _MetricsLine(
+                    date: _formatDate(ride.startTime),
+                    durationSeconds: ride.durationSeconds,
+                    avgKmh: ride.averageSpeedKmh,
+                    maxKmh: ride.maxSpeedKmh,
+                    unit: unit,
                   ),
                 ],
-                // A recording that never went anywhere has a "shape" made
-                // entirely of GPS drift; stretched across the card it reads as a
-                // real route. Same floor the route key uses.
-                if (ride.totalDistanceMeters >= kRouteMinDistanceMeters &&
-                    RouteSparkline.canDraw(ride.routeBlob)) ...[
-                  const SizedBox(height: 12),
-                  RouteSparkline(blob: ride.routeBlob, height: 44),
-                ],
-                const SizedBox(height: 12),
-                _MetricsLine(
-                  date: _formatDate(ride.startTime),
-                  durationSeconds: ride.durationSeconds,
-                  avgKmh: ride.averageSpeedKmh,
-                  maxKmh: ride.maxSpeedKmh,
-                  unit: unit,
-                ),
-              ],
+              ),
             ),
-          ),
+            const SizedBox(width: 12),
+            _DistanceBlock(meters: ride.totalDistanceMeters, unit: unit),
+            // Decorative: the whole row opens the ride, so this only says the
+            // row leads somewhere. Excluded from semantics — the row is already
+            // announced as a button. Sized to the trip row's real control so the
+            // distance columns agree.
+            ExcludeSemantics(
+              child: SizedBox(
+                width: 44,
+                child: Center(
+                  child: Icon(
+                    Icons.chevron_right,
+                    size: 16,
+                    // Between `border` (which would be invisible) and
+                    // `textTertiary` (which would compete with the metadata it
+                    // sits beside). Alpha rather than a new token: this is one
+                    // decoration, not a colour the design needs a name for.
+                    color: cx.textTertiary.withValues(alpha: 0.6),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-/// A finished trip: the parent's combined stats, with its stints nested underneath
-/// behind a connector line (F21).
+/// A finished trip: one row that reads like any other, distinguished only by a
+/// `TRIP · N stints` label before the name, expanding in place to its stints (F21).
 ///
-/// Collapsed by default — the point of a trip is that it reads as *one* thing in
-/// the list — but expandable in place, because "which stint was the long one?" used
-/// to require opening a whole screen.
-class _TripCard extends StatefulWidget {
-  const _TripCard({
+/// The old card wore three separate badges of trip-ness — an amber bar down the
+/// left edge, an `alt_route` icon, and a full-width "Show 2 stints" button across
+/// the bottom — to say one thing. Now the label says it and the row's own chevron
+/// does the expanding (spec 6.4), which also means a trip costs the list the same
+/// height as a ride until someone asks it not to.
+class _TripRow extends StatefulWidget {
+  const _TripRow({
     required this.summary,
     required this.unit,
     required this.query,
@@ -1036,189 +998,137 @@ class _TripCard extends StatefulWidget {
   final void Function(Ride stint) onOpenStint;
 
   @override
-  State<_TripCard> createState() => _TripCardState();
+  State<_TripRow> createState() => _TripRowState();
 }
 
-class _TripCardState extends State<_TripCard> {
+class _TripRowState extends State<_TripRow> {
   bool _expanded = false;
 
   @override
   Widget build(BuildContext context) {
     final cx = AppColors.of(context);
+    final t = Theme.of(context).textTheme;
     final stats = widget.summary.stats;
     final unit = widget.unit;
     final name = widget.summary.trip.name?.trim();
-    final stintLabel = stats.stintCount == 1 ? '1 stint' : '${stats.stintCount} stints';
+    final named = name?.isNotEmpty == true;
+    final stintLabel =
+        stats.stintCount == 1 ? '1 stint' : '${stats.stintCount} stints';
+    final expandable = stats.stintCount > 0;
 
-    return Container(
-      decoration: BoxDecoration(
-        color: cx.surface,
-        borderRadius: BorderRadius.circular(16),
-        // The bracket: a heavier amber edge down the left says everything inside
-        // belongs to one journey.
-        border: Border.all(color: cx.border),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          // IntrinsicHeight + stretch so the bracket runs the full height of
-          // whatever the header turns out to be — a fixed height stops short the
-          // moment a long trip name wraps to two lines.
-          IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Container(width: 3, color: cx.accent),
-                Expanded(
-                child: InkWell(
-                  onTap: widget.onTap,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(13, 14, 16, 14),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+    return Column(
+      children: [
+        HairlineRow(
+          onTap: widget.onTap,
+          // The chevron owns the right-hand edge and needs its full 48dp, so the
+          // row gives up its own trailing gutter to it.
+          trailingGutter: 0,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
                       children: [
-                        Row(
-                          children: [
-                            Icon(Icons.alt_route, color: cx.accentInk, size: 15),
-                            const SizedBox(width: 5),
-                            Text(
-                              'TRIP · $stintLabel',
-                              style: TextStyle(
-                                color: cx.accentInk,
-                                fontSize: kMinFontSize,
-                                letterSpacing: 1.4,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: _Highlighted(
-                                text: name?.isNotEmpty == true
-                                    ? name!
-                                    : 'Untitled trip',
-                                query: widget.query,
-                                style: TextStyle(
-                                  color: cx.textBright,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Text.rich(
-                              TextSpan(
-                                text: unit
-                                    .distanceMeters(stats.totalDistanceMeters)
-                                    .toStringAsFixed(2),
-                                style: TextStyle(
-                                  color: cx.accentInk,
-                                  fontSize: 22,
-                                  height: 1.1,
-                                  fontWeight: FontWeight.w800,
-                                  fontFeatures: kTabularFigures,
-                                ),
-                                children: [
-                                  TextSpan(
-                                    text: ' ${unit.distanceLabel}',
-                                    style: TextStyle(
-                                      color: cx.textDim,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        _MetricsLine(
-                          date: stats.startTime == null
-                              ? '—'
-                              : _formatDate(stats.startTime!),
-                          durationSeconds: stats.durationSeconds,
-                          avgKmh: stats.averageSpeedKmh,
-                          maxKmh: stats.maxSpeedKmh,
-                          unit: unit,
+                        // The one amber thing in the row, and the only thing
+                        // that has to survive at a glance: this entry is not a
+                        // ride, it is several.
+                        Text(
+                          'TRIP · ${stintLabel.toUpperCase()}',
+                          style: t.labelSmall!.copyWith(
+                            color: cx.accentInk,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ],
                     ),
-                  ),
-                ),
-                ),
-              ],
-            ),
-          ),
-          if (stats.stintCount > 0)
-            InkWell(
-              onTap: () => setState(() => _expanded = !_expanded),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                decoration: BoxDecoration(
-                  border: Border(top: BorderSide(color: cx.border)),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      _expanded ? 'Hide stints' : 'Show $stintLabel',
-                      style: TextStyle(
-                        color: cx.accentInk,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
+                    const SizedBox(height: 3),
+                    _Highlighted(
+                      text: named ? name! : 'Untitled trip',
+                      query: widget.query,
+                      style: t.titleMedium!.copyWith(
+                        color: named ? cx.textBright : cx.textDim,
                       ),
                     ),
-                    const SizedBox(width: 4),
-                    Icon(
-                      _expanded ? Icons.expand_less : Icons.expand_more,
-                      size: 18,
-                      color: cx.accentInk,
+                    const SizedBox(height: 3),
+                    _MetricsLine(
+                      date: stats.startTime == null
+                          ? '—'
+                          : _formatDate(stats.startTime!),
+                      durationSeconds: stats.durationSeconds,
+                      avgKmh: stats.averageSpeedKmh,
+                      maxKmh: stats.maxSpeedKmh,
+                      unit: unit,
                     ),
                   ],
                 ),
               ),
-            ),
-          if (_expanded)
-            Container(
-              width: double.infinity,
-              decoration: BoxDecoration(
-                color: cx.canvas,
-                border: Border(top: BorderSide(color: cx.border)),
-              ),
-              padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
-              child: Column(
-                children: [
-                  for (var i = 0; i < stats.stints.length; i++)
-                    _StintRow(
-                      stint: stats.stints[i],
-                      index: i + 1,
-                      isLast: i == stats.stints.length - 1,
-                      unit: unit,
-                      query: widget.query,
-                      onTap: () => widget.onOpenStint(stats.stints[i]),
+              const SizedBox(width: 12),
+              _DistanceBlock(meters: stats.totalDistanceMeters, unit: unit),
+              // Unlike a ride's decorative chevron this one is a real control,
+              // so it gets a real target: 44dp square, not a 16dp glyph. It does
+              // *not* get its own colour, though — an amber chevron here put a
+              // second amber on every trip row beside the TRIP label (G2), and
+              // on device the two together read as a play button. The label
+              // already says this entry is several rides; the chevron only has
+              // to say it moves, which the flip to an up-arrow does.
+              if (expandable)
+                Semantics(
+                  button: true,
+                  expanded: _expanded,
+                  label: _expanded ? 'Hide $stintLabel' : 'Show $stintLabel',
+                  child: InkWell(
+                    onTap: () => setState(() => _expanded = !_expanded),
+                    customBorder: const CircleBorder(),
+                    child: SizedBox(
+                      width: 44,
+                      height: 44,
+                      child: Center(
+                        child: Icon(
+                          _expanded
+                              ? Icons.keyboard_arrow_up
+                              : Icons.chevron_right,
+                          size: 18,
+                          color: cx.textTertiary,
+                        ),
+                      ),
                     ),
-                ],
-              ),
+                  ),
+                )
+              else
+                const SizedBox(width: kRowGutter),
+            ],
+          ),
+        ),
+        if (_expanded)
+          for (var i = 0; i < stats.stints.length; i++)
+            _StintRow(
+              stint: stats.stints[i],
+              index: i + 1,
+              unit: unit,
+              query: widget.query,
+              onTap: () => widget.onOpenStint(stats.stints[i]),
             ),
-        ],
-      ),
+      ],
     );
   }
 }
 
-/// One nested stint: a numbered node on a vertical connector, then the stint's name
-/// and distance. The connector is what makes "these belong together, in this
-/// order" legible without a caption.
+/// One nested stint, indented behind a rail (spec 6.5).
+///
+/// The numbered dots and per-stint connector segments are gone: a single unbroken
+/// rail down the left says "these belong to the row above, in this order" with one
+/// line instead of one widget per stint, and the stints are already listed in
+/// order — the numbers were labelling their own position.
+///
+/// No hairline of its own. The rail is the separator here, and a rule as well
+/// would draw a grid.
 class _StintRow extends StatelessWidget {
   const _StintRow({
     required this.stint,
     required this.index,
-    required this.isLast,
     required this.unit,
     required this.query,
     required this.onTap,
@@ -1226,7 +1136,6 @@ class _StintRow extends StatelessWidget {
 
   final Ride stint;
   final int index;
-  final bool isLast;
   final SpeedUnit unit;
   final String query;
   final VoidCallback onTap;
@@ -1234,100 +1143,81 @@ class _StintRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cx = AppColors.of(context);
+    final t = Theme.of(context).textTheme;
     final name = stint.name?.trim().isNotEmpty == true
         ? stint.name!.trim()
         : 'Stint $index';
     final routeLabel = PlaceRouteLabel.label(stint.startPlace, stint.endPlace);
-    return InkWell(
-      onTap: onTap,
-      child: IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            SizedBox(
-              width: 22,
-              child: Column(
-                children: [
-                  const SizedBox(height: 12),
-                  Container(
-                    width: 9,
-                    height: 9,
-                    decoration: BoxDecoration(
-                      color: cx.accent,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                  // The trailing stint's line stops at its own node — a connector
-                  // running past the last stint implies another one is coming.
-                  Expanded(
-                    child: Container(
-                      width: 1.5,
-                      color: isLast ? Colors.transparent : cx.border,
-                    ),
-                  ),
-                ],
-              ),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.only(left: kRowGutter),
+          child: Container(
+            decoration: BoxDecoration(
+              border: Border(left: BorderSide(color: cx.border)),
             ),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(6, 8, 0, 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _Highlighted(
-                            text: name,
-                            query: query,
-                            style: TextStyle(
-                              color: cx.textBright,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
+            // Right padding is the parent row's 44dp chevron slot, not the
+            // shared gutter: the parent's distance is inset by that chevron, so
+            // matching the gutter here would leave the stint figures 26dp
+            // further right than the total they belong to. Caught on device —
+            // the misalignment is invisible until a trip is actually expanded.
+            padding: const EdgeInsets.fromLTRB(14, 9, 44, 9),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _Highlighted(
+                        text: name,
+                        query: query,
+                        style: TextStyle(
+                          color: cx.textBright,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
                         ),
-                        const SizedBox(width: 8),
-                        Text(
-                          '${unit.distanceMeters(stint.totalDistanceMeters).toStringAsFixed(2)} ${unit.distanceLabel}',
-                          style: TextStyle(
-                            color: cx.textDim,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            fontFeatures: kTabularFigures,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      [
-                        _formatDate(stint.startTime),
-                        ?routeLabel,
-                      ].join(' · '),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: cx.textTertiary,
-                        fontSize: kMinFontSize,
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 2),
+                      Text(
+                        [_formatDate(stint.startTime), ?routeLabel].join(' · '),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: t.bodySmall,
+                      ),
+                    ],
+                  ),
                 ),
-              ),
+                const SizedBox(width: 12),
+                // Same 78dp axis as the parent rows, a step down in weight — so
+                // a stint's distance still lines up under the trip's total.
+                _DistanceBlock(
+                  meters: stint.totalDistanceMeters,
+                  unit: unit,
+                  style: TextStyle(
+                    color: cx.textDim,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    fontFeatures: kTabularFigures,
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
   }
 }
 
-/// The one quiet line a card ends on: when, how long, and the two speeds.
+/// The one quiet line a row ends on: when, how long, and the two speeds.
 ///
-/// Every value the same size and the same neutral colour — the card's job is to
-/// be scanned, and five equally-loud numbers in a four-column grid was the
-/// opposite of that. Peak carries the neutral [AppPalette.peak], never red.
+/// **One style, start to finish** (G3). It used to mix w600 values against w400
+/// separators and paint peak in its own colour, which made a row's least
+/// important line its most visually complicated. A rider scans this line or
+/// ignores it; nothing in it needs to win.
 ///
 /// Moving time is deliberately *not* here. With it the line ran to 61 characters
 /// and wrapped, stranding "peak km/h" alone on a second row — and the
@@ -1349,32 +1239,16 @@ class _MetricsLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cx = AppColors.of(context);
-    final dim = TextStyle(color: cx.textTertiary, fontSize: kMinFontSize);
-    final value = TextStyle(
-      color: cx.textDim,
-      fontSize: kMinFontSize,
-      fontWeight: FontWeight.w600,
-      fontFeatures: kTabularFigures,
-    );
-    return Text.rich(
-      TextSpan(
-        children: [
-          TextSpan(text: date, style: dim),
-          TextSpan(text: '  ·  ', style: dim),
-          TextSpan(text: formatDuration(durationSeconds), style: value),
-          TextSpan(text: '  ·  ', style: dim),
-          TextSpan(text: unit.speed(avgKmh).toStringAsFixed(0), style: value),
-          TextSpan(text: ' avg  ·  ', style: dim),
-          TextSpan(
-            text: unit.speed(maxKmh).toStringAsFixed(0),
-            style: value.copyWith(color: cx.peak),
-          ),
-          TextSpan(text: ' peak ${unit.speedLabel}', style: dim),
-        ],
-      ),
-      maxLines: 2,
+    return Text(
+      [
+        date,
+        formatDuration(durationSeconds),
+        '${unit.speed(avgKmh).toStringAsFixed(0)} avg',
+        '${unit.speed(maxKmh).toStringAsFixed(0)} peak ${unit.speedLabel}',
+      ].join('  ·  '),
+      maxLines: 1,
       overflow: TextOverflow.ellipsis,
+      style: Theme.of(context).textTheme.bodySmall,
     );
   }
 }

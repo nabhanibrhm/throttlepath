@@ -216,54 +216,82 @@ const List<FontFeature> kTabularFigures = <FontFeature>[
 
 /// Smallest type the app is allowed to render. The audit found 8–9sp unit
 /// labels; below 12sp nothing survives sunlight at arm's length.
+///
+/// The minimal-look spec asked for 11.5sp metadata and 10sp section labels.
+/// Both are refused: this floor was raised deliberately after an audit found
+/// small type on this exact screen size, and `test/contrast_test.dart` holds it.
+/// The minimal look comes from the hierarchy and the hairline rows, not from the
+/// bottom two steps being 2sp smaller — so the scale's bottom clamps here.
 const double kMinFontSize = 12;
+
+/// Horizontal gutter shared by every list row, section label and header (G6).
+/// One number, so a row and the label above it can't drift apart by 4dp.
+const double kRowGutter = 18;
+
+/// Vertical padding inside a hairline list row (G6). Rows grow past this when
+/// their content needs it — it is padding, never a fixed height.
+const double kRowPadding = 13;
 
 ThemeData buildLightTheme() => _themeFrom(AppPalette.light);
 ThemeData buildDarkTheme() => _themeFrom(AppPalette.dark);
 
 /// The app's type scale, as an *overlay* on Material's defaults.
 ///
-/// Only the six roles the design actually specifies are pinned here; the rest
-/// of the `TextTheme` is left to Material, because widgets like `ListTile` and
-/// `TextButton` dereference roles (`bodyLarge`, `labelLarge`, `titleLarge`)
-/// with a bang and would crash on a wholesale replacement.
+/// Only the roles the design actually specifies are pinned here; the rest of the
+/// `TextTheme` is left to Material, because widgets like `ListTile` and
+/// `TextButton` dereference roles (`bodyLarge`, `labelLarge`) with a bang and
+/// would crash on a wholesale replacement.
 ///
 /// Inter is bundled as an asset (see pubspec) so it renders offline from first
 /// launch; it already carries a `tnum` table, so [kTabularFigures] works
-/// without pulling in a second font family.
+/// without pulling in a second font family. The minimal-look spec was drawn in
+/// Barlow; Inter stays, because the only thing Barlow bought was the condensed
+/// numeral, and Inter already has the weights and the `tnum` the scale needs.
+///
+/// Flutter's `letterSpacing` is logical pixels, not ems — the spec's `-0.035em`
+/// tracking is converted per role (74 × -0.035 ≈ -2.6) rather than carried as a
+/// ratio, so each value below is already the pixel figure.
 TextTheme _applyTypeScale(TextTheme base, AppPalette p) {
   return base.copyWith(
     // Live speed. The one number read in motion.
     displayLarge: TextStyle(
       fontFamily: 'Inter',
-      fontSize: 64,
+      fontSize: 74,
       height: 1.0,
-      fontWeight: FontWeight.w600,
-      letterSpacing: -1.5,
+      fontWeight: FontWeight.w700,
+      letterSpacing: -2.6,
       fontFeatures: kTabularFigures,
       color: p.textBright,
     ),
     // Hero stat — the distance on a summary or detail screen.
     displayMedium: TextStyle(
       fontFamily: 'Inter',
-      fontSize: 34,
-      height: 1.05,
-      fontWeight: FontWeight.w600,
-      letterSpacing: -0.8,
+      fontSize: 46,
+      height: 1.0,
+      fontWeight: FontWeight.w700,
+      letterSpacing: -1.4,
       fontFeatures: kTabularFigures,
       color: p.textBright,
     ),
-    // Supporting stat values.
-    headlineSmall: TextStyle(
+    // Screen titles: "Rides", "Settings".
+    titleLarge: TextStyle(
       fontFamily: 'Inter',
-      fontSize: 20,
-      height: 1.1,
+      fontSize: 21,
+      height: 1.2,
       fontWeight: FontWeight.w600,
       letterSpacing: -0.2,
+      color: p.textBright,
+    ),
+    // Stat values and a list row's distance.
+    headlineSmall: TextStyle(
+      fontFamily: 'Inter',
+      fontSize: 18,
+      height: 1.1,
+      fontWeight: FontWeight.w600,
       fontFeatures: kTabularFigures,
       color: p.textBright,
     ),
-    // Ride / trip titles.
+    // Ride / trip titles, and a settings row's label.
     titleMedium: TextStyle(
       fontFamily: 'Inter',
       fontSize: 15,
@@ -271,22 +299,35 @@ TextTheme _applyTypeScale(TextTheme base, AppPalette p) {
       fontWeight: FontWeight.w600,
       color: p.textBright,
     ),
-    // Dates, routes, prose. Stays `textBright`: this is also the default style
+    // Row labels and prose. Stays `textBright`: this is also the default style
     // for a bare `Text()` inside a Material, so dimming it here would quietly
     // grey out every unstyled string in the app.
     bodyMedium: TextStyle(
       fontFamily: 'Inter',
-      fontSize: 13,
+      fontSize: 14,
       height: 1.35,
+      fontWeight: FontWeight.w500,
       color: p.textBright,
     ),
-    // All-caps stat labels. The 12sp floor lives here.
+    // Metadata: the one style every "when · how long · how fast" line uses (G3).
+    // Never bold — the whole point is that it stops competing with the name and
+    // the distance. Clamped up to the 12sp floor from the spec's 11.5.
+    bodySmall: TextStyle(
+      fontFamily: 'Inter',
+      fontSize: kMinFontSize,
+      height: 1.3,
+      fontWeight: FontWeight.w400,
+      fontFeatures: kTabularFigures,
+      color: p.textTertiary,
+    ),
+    // All-caps section labels. Clamped up to the floor from the spec's 10sp;
+    // all-caps at 10sp is the hardest thing on the screen to read in daylight.
     labelSmall: TextStyle(
       fontFamily: 'Inter',
       fontSize: kMinFontSize,
       height: 1.2,
-      fontWeight: FontWeight.w500,
-      letterSpacing: 1.0,
+      fontWeight: FontWeight.w600,
+      letterSpacing: 1.7,
       color: p.textTertiary,
     ),
   );

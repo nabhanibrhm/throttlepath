@@ -82,7 +82,6 @@ class AnalogSpeedGauge extends StatelessWidget {
               return CustomPaint(
                 painter: _GaugePainter(
                   fraction: fraction,
-                  scale: scale,
                   maxFraction: scale == 0
                       ? 0
                       : (maxSpeed.clamp(0.0, scale)) / scale,
@@ -104,16 +103,19 @@ class AnalogSpeedGauge extends StatelessWidget {
                         speed.toStringAsFixed(0),
                         style: TextStyle(
                           color: cx.textBright,
-                          fontSize: 52,
+                          fontSize: 54,
                           height: 1,
-                          fontWeight: FontWeight.w800,
+                          fontWeight: FontWeight.w700,
                           fontFeatures: kTabularFigures,
                         ),
                       ),
-                      const SizedBox(height: 2),
                       Text(
                         unitLabel,
-                        style: TextStyle(color: cx.textDim, fontSize: 14),
+                        style: TextStyle(
+                          color: cx.textTertiary,
+                          fontSize: kMinFontSize,
+                          letterSpacing: 0.4,
+                        ),
                       ),
                     ],
                   ),
@@ -132,7 +134,6 @@ class AnalogSpeedGauge extends StatelessWidget {
 class _GaugePainter extends CustomPainter {
   _GaugePainter({
     required this.fraction,
-    required this.scale,
     required this.maxFraction,
     required this.track,
     required this.sweep,
@@ -145,8 +146,9 @@ class _GaugePainter extends CustomPainter {
   /// Current speed as 0..1 of the dial.
   final double fraction;
 
-  /// Top-of-scale, in display units — only used to label the ticks.
-  final double scale;
+  // The painter used to take the top-of-scale so it could print a number under
+  // each tick. With the tick labels gone it draws ticks at fractions of the arc
+  // and never needs to know what those fractions mean.
 
   /// The ride's peak as 0..1 of the dial.
   final double maxFraction;
@@ -160,8 +162,16 @@ class _GaugePainter extends CustomPainter {
   /// The midpoint tick + label, drawn brighter than the rest.
   final Color anchorTick;
 
-  static const double _stroke = 14;
-  static const int _majorTicks = 5; // 0, ¼, ½, ¾, max
+  /// Track/sweep thickness. Was 14 — a band wide enough to be the loudest thing
+  /// on the sheet (spec 3.3). At 2 the sweep *underlines* the speed instead of
+  /// competing with it, and the numeral inside becomes the reading.
+  static const double _stroke = 2;
+
+  /// Just the two stops and the midpoint (spec 3.1). Was five, each with a
+  /// printed number — a third encoding of a value the numeral already states
+  /// exactly. What the ticks are for is the landmark that turns the sweep into
+  /// "a bit past half"; three do that, and the quarter ticks only added ink.
+  static const int _majorTicks = 3; // 0, ½, max
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -186,60 +196,42 @@ class _GaugePainter extends CustomPainter {
       canvas.drawArc(rect, math.pi, math.pi * fraction, false, sweepPaint);
     }
 
-    // Ticks + labels just inside the track. The midpoint (straight up) is drawn
-    // longer and brighter: on a fixed dial it is the landmark the rider learns,
-    // and it turns "roughly two thirds" into "a bit past half" at a glance.
+    // Three ticks just outside the track, no printed numbers. The midpoint
+    // (straight up) stays the landmark a rider learns; the two stops say where
+    // the scale begins and ends. Drawn outward from the track now rather than
+    // inward: at stroke 2 there is no band left to sit inside.
     for (var i = 0; i < _majorTicks; i++) {
       final t = i / (_majorTicks - 1);
       final midpoint = i == _majorTicks ~/ 2;
       final angle = math.pi + math.pi * t;
-      final outer = radius - _stroke / 2 - 2;
-      final inner = outer - (midpoint ? 13 : 8);
+      final inner = radius + _stroke / 2 + 2;
+      final outer = inner + (midpoint ? 8 : 5);
       final tickPaint = Paint()
         ..color = midpoint ? anchorTick : tickLabel
-        ..strokeWidth = midpoint ? 3 : 2
+        ..strokeWidth = midpoint ? 2 : 1.5
         ..strokeCap = StrokeCap.round;
       canvas.drawLine(
         center + Offset(math.cos(angle) * inner, math.sin(angle) * inner),
         center + Offset(math.cos(angle) * outer, math.sin(angle) * outer),
         tickPaint,
       );
-
-      final label = (scale * t).toStringAsFixed(0);
-      final tp = TextPainter(
-        text: TextSpan(
-          text: label,
-          style: TextStyle(
-            color: midpoint ? anchorTick : tickLabel,
-            fontSize: 12,
-            fontWeight: midpoint ? FontWeight.w800 : FontWeight.w600,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      // Measured off the standard tick length, not [inner] — otherwise the
-      // longer midpoint tick would drag its own label out of line with the rest.
-      final labelR = outer - 8 - 14;
-      final lp = center +
-          Offset(math.cos(angle) * labelR, math.sin(angle) * labelR) -
-          Offset(tp.width / 2, tp.height / 2);
-      tp.paint(canvas, lp);
     }
 
-    // Peak-so-far marker: a short red tick sitting on the track.
+    // Peak-so-far marker: a short neutral tick crossing the track.
+    //
+    // Kept, though the spec's tick list doesn't mention it — it is the only place
+    // the ride's peak appears on this backdrop, and it costs one stroke. Its
+    // length is no longer measured off the track's thickness: at stroke 2 that
+    // would have made it a 4px dash nobody could see.
     if (maxFraction > 0.01) {
       final angle = math.pi + math.pi * maxFraction;
       final peakPaint = Paint()
         ..color = peak
-        ..strokeWidth = 3
+        ..strokeWidth = 2.5
         ..strokeCap = StrokeCap.round;
       canvas.drawLine(
-        center +
-            Offset(math.cos(angle) * (radius - _stroke / 2 - 1),
-                math.sin(angle) * (radius - _stroke / 2 - 1)),
-        center +
-            Offset(math.cos(angle) * (radius + _stroke / 2 + 1),
-                math.sin(angle) * (radius + _stroke / 2 + 1)),
+        center + Offset(math.cos(angle) * (radius - 5), math.sin(angle) * (radius - 5)),
+        center + Offset(math.cos(angle) * (radius + 5), math.sin(angle) * (radius + 5)),
         peakPaint,
       );
     }
@@ -283,7 +275,6 @@ class _GaugePainter extends CustomPainter {
   @override
   bool shouldRepaint(_GaugePainter old) =>
       old.fraction != fraction ||
-      old.scale != scale ||
       old.maxFraction != maxFraction ||
       old.sweep != sweep ||
       old.needle != needle ||

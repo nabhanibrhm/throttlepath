@@ -249,7 +249,24 @@ class _HoldToEndButtonState extends State<_HoldToEndButton>
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  ColoredBox(color: cx.danger),
+                  // Outline, not a fill (spec 4.2). A solid red block beside
+                  // PAUSE made ending the ride look like the thing you came here
+                  // to press; it is the thing you press once, at the end. The
+                  // *hold* is what protects the ride, not the loudness.
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: cx.danger.withValues(alpha: 0.5),
+                      ),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                  // Hold progress fills the button from the left in danger red at
+                  // low alpha. The old version washed white over a solid red fill
+                  // — with the fill gone there was nothing to wash, so the sweep
+                  // *becomes* the fill: at completion the button is the solid red
+                  // it used to start as, which is a better ending than a bar
+                  // quietly reaching the far edge.
                   AnimatedBuilder(
                     animation: _c,
                     builder: (_, _) => Align(
@@ -258,7 +275,7 @@ class _HoldToEndButtonState extends State<_HoldToEndButton>
                         widthFactor: _c.value,
                         heightFactor: 1,
                         child: ColoredBox(
-                          color: Colors.white.withValues(alpha: 0.35),
+                          color: cx.danger.withValues(alpha: 0.85),
                         ),
                       ),
                     ),
@@ -275,7 +292,11 @@ class _HoldToEndButtonState extends State<_HoldToEndButton>
                             widget.label,
                             maxLines: 1,
                             style: TextStyle(
-                              color: cx.onAccent,
+                              // The theme token, never a literal #FF6B6B: that
+                              // hex only equals `dangerInk` on dark, and hard-
+                              // coding it would silently give the light theme
+                              // dark theme's red.
+                              color: cx.dangerInk,
                               fontSize: 15,
                               fontWeight: FontWeight.w800,
                             ),
@@ -286,7 +307,7 @@ class _HoldToEndButtonState extends State<_HoldToEndButton>
                           subLabel,
                           maxLines: 1,
                           style: TextStyle(
-                            color: cx.onAccent.withValues(alpha: 0.85),
+                            color: cx.dangerInk.withValues(alpha: 0.85),
                             fontSize: kMinFontSize,
                             fontWeight: FontWeight.w700,
                             letterSpacing: 0.3,

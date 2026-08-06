@@ -67,7 +67,7 @@ void main() {
       expect(t.takeException(), isNull);
     });
 
-    testWidgets('the imperial dial labels its own scale, not the metric one',
+    testWidgets('the imperial dial names its own unit, not the metric one',
         (t) async {
       await t.pumpWidget(_host(AnalogSpeedGauge(
         speed: 40,

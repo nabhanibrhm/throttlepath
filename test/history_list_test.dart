@@ -135,6 +135,14 @@ Widget host({
   );
 }
 
+/// A filter chip, e.g. `chip('Rides', 1)`.
+///
+/// `findRichText` because the count is a dimmed span inside the label rather than
+/// part of one flat string (spec 5.3) — it is the chip's supporting detail, not
+/// half the word being tapped.
+Finder chip(String label, int count) =>
+    find.text('$label  $count', findRichText: true);
+
 WeekStats weekWith({
   double meters = 42300,
   int rides = 3,
@@ -161,8 +169,7 @@ void main() {
 
   setUpAll(loadInter);
 
-  testWidgets('a ride reads name, distance, shape, then the quiet numbers',
-      (t) async {
+  testWidgets('a ride reads name, place, then the quiet numbers', (t) async {
     useDeviceSurface(t);
     await t.pumpWidget(host(rides: [
       makeRide(
@@ -177,22 +184,33 @@ void main() {
     expect(find.text('Morning commute'), findsOneWidget);
     expect(find.textContaining('30.67'), findsOneWidget);
     expect(find.text('Bandung → Lembang'), findsOneWidget);
-    // The route's shape, drawn from routeBlob — no query, no tiles.
-    expect(find.byType(RouteSparkline), findsOneWidget);
     expect(t.takeException(), isNull);
   });
 
-  testWidgets('a ride with no derived shape simply omits the sparkline',
-      (t) async {
+  testWidgets('no row draws a route sparkline, shape or not', (t) async {
     useDeviceSurface(t);
-    // Every ride recorded before the Phase 4 migration is in this state until the
-    // backfill reaches it; the card must not reserve a blank strip for it.
+    // The minimal pass took the sparkline out of the list (spec 6.1): it cost
+    // ~56dp of every row for a shape the detail screen and the share card show
+    // properly. `RouteSparkline` itself is still alive and still used by the
+    // post-ride summary — this asserts the *list* stopped drawing one, which is
+    // also what keeps a row's height honest.
     await t.pumpWidget(host(rides: [
-      makeRide(id: 1, start: july, name: 'Old ride', withShape: false),
+      makeRide(id: 1, start: july, name: 'Has a shape'),
+      makeRide(id: 2, start: july, name: 'Old ride', withShape: false),
     ]));
     await t.pumpAndSettle();
+    expect(find.text('Has a shape'), findsOneWidget);
     expect(find.text('Old ride'), findsOneWidget);
     expect(find.byType(RouteSparkline), findsNothing);
+  });
+
+  testWidgets('an unnamed ride is dimmed rather than badged', (t) async {
+    useDeviceSurface(t);
+    await t.pumpWidget(host(rides: [makeRide(id: 1, start: july)]));
+    await t.pumpAndSettle();
+    final style = t.widget<Text>(find.text('Untitled ride')).style!;
+    expect(style.color, AppPalette.dark.textDim,
+        reason: 'the absence of a name should not shout louder than a name');
   });
 
   testWidgets('rides group under their month, with that month\'s total',
@@ -229,10 +247,14 @@ void main() {
     await t.pumpAndSettle();
 
     expect(find.byType(WeekStrip), findsOneWidget);
-    expect(find.text('THIS WEEK'), findsOneWidget);
     expect(find.text('42.3'), findsOneWidget);
-    expect(find.text('3 rides · 3h 30m moving'), findsOneWidget);
-    expect(find.text('+11% vs last week'), findsOneWidget);
+    // The THIS WEEK label is gone: the unit now rides along with the number, so
+    // the label was the third layer of chrome around two facts (spec 5.1).
+    expect(find.text('THIS WEEK'), findsNothing);
+    expect(find.text('km this week'), findsOneWidget);
+    // Rides, moving time and the delta are one line now, not two plus an arrow.
+    expect(find.text('3 rides · 3h 30m moving · +11% vs last week'),
+        findsOneWidget);
   });
 
   testWidgets('an empty week says so instead of showing zeros', (t) async {
@@ -264,15 +286,18 @@ void main() {
     await t.pumpAndSettle();
 
     expect(find.text('Weekend run'), findsOneWidget);
-    expect(find.text('TRIP · 2 stints'), findsOneWidget);
+    expect(find.text('TRIP · 2 STINTS'), findsOneWidget);
     // Collapsed by default — the point of a trip is that it reads as one thing.
     expect(find.text('Out'), findsNothing);
 
-    await t.tap(find.text('Show 2 stints'));
+    // The full-width "Show 2 stints" button is gone; the row's own chevron does
+    // the expanding, so a collapsed trip costs the list the same height as a
+    // ride (spec 6.4). Found by its semantics label, since it is now an icon.
+    await t.tap(find.bySemanticsLabel('Show 2 stints'));
     await t.pumpAndSettle();
     expect(find.text('Out'), findsOneWidget);
     expect(find.text('Back'), findsOneWidget);
-    expect(find.text('Hide stints'), findsOneWidget);
+    expect(find.bySemanticsLabel('Hide 2 stints'), findsOneWidget);
     expect(t.takeException(), isNull);
   });
 
@@ -291,19 +316,21 @@ void main() {
     ));
     await t.pumpAndSettle();
 
-    expect(find.text('All  2'), findsOneWidget);
-    expect(find.text('Rides  1'), findsOneWidget);
-    expect(find.text('Trips  1'), findsOneWidget);
+    expect(chip('All', 2), findsOneWidget);
+    expect(chip('Rides', 1), findsOneWidget);
+    expect(chip('Trips', 1), findsOneWidget);
 
-    await t.tap(find.text('Trips  1'));
+    await t.tap(chip('Trips', 1));
     await t.pumpAndSettle();
     expect(find.text('A trip'), findsOneWidget);
     expect(find.text('Solo ride'), findsNothing);
-    // The running total for whatever the filters left.
-    expect(find.textContaining('1 result'), findsOneWidget);
+    // No running-total line under the chips any more (spec 5.2) — the chip the
+    // rider just tapped already carries the count, directly above where the line
+    // used to restate it.
+    expect(find.textContaining('result'), findsNothing);
   });
 
-  testWidgets('search matches names and places, and reports the total',
+  testWidgets('search matches names and places, and narrows the chip counts',
       (t) async {
     useDeviceSurface(t);
     await t.pumpWidget(host(rides: [
@@ -325,7 +352,9 @@ void main() {
 
     expect(find.text('To the hills'), findsOneWidget);
     expect(find.text('Groceries'), findsNothing);
-    expect(find.text('1 result · 20.0 km'), findsOneWidget);
+    // The chip counts narrow with the search, which is what the deleted result
+    // line was for.
+    expect(chip('All', 1), findsOneWidget);
   });
 
   testWidgets('a search with no matches says so in the rider\'s own words',
@@ -441,12 +470,12 @@ void main() {
       // `.first` is the CustomScrollView's own Scrollable; the filter chips'
       // horizontal ListView is nested inside it and comes later.
       await t.scrollUntilVisible(
-        find.text('Show 1 stint'),
+        find.bySemanticsLabel('Show 1 stint'),
         140,
         scrollable: find.byType(Scrollable).first,
       );
       await t.pumpAndSettle();
-      await t.tap(find.text('Show 1 stint'));
+      await t.tap(find.bySemanticsLabel('Show 1 stint'));
       await t.pumpAndSettle();
       expect(t.takeException(), isNull,
           reason: 'nested stints overflowed on ${theme.brightness}');
@@ -468,7 +497,13 @@ void main() {
     await t.pumpAndSettle();
 
     expect(find.text('Rides'), findsOneWidget);
-    expect(find.textContaining('this week'), findsNothing);
+    // The toolbar's echo of the figure, specifically — not any text containing
+    // "this week". The expanded strip now says "km this week" beside its own
+    // number (spec 5.1 folded the unit into the line and retired the THIS WEEK
+    // label), so a substring match would find the strip itself. What must not
+    // appear while the strip is open is the *second* copy in the toolbar: the
+    // same figure twice, 20dp apart, reads as a rendering bug.
+    expect(find.text('· 42.3 km this week'), findsNothing);
 
     await t.drag(find.text('Ride 1'), const Offset(0, -400));
     await t.pumpAndSettle();

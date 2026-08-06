@@ -50,14 +50,7 @@ class WeekStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     final cx = AppColors.of(context);
     final delta = deltaText(stats);
-    final fraction = stats.deltaFraction ?? 0;
-    final up = fraction > 0;
-    // Three-way, not up-or-flat: a week down 58% drawn with `trending_flat`
-    // says "level", which is the opposite of what happened. Down stays neutral
-    // ink — red means irreversible, and riding less is not an error.
-    final trendIcon = fraction > 0
-        ? Icons.trending_up
-        : (fraction < 0 ? Icons.trending_down : Icons.trending_flat);
+    final up = (stats.deltaFraction ?? 0) > 0;
 
     if (compact) {
       return Row(
@@ -101,146 +94,89 @@ class WeekStrip extends StatelessWidget {
       );
     }
 
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-      decoration: BoxDecoration(
-        color: cx.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: cx.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(
-                'THIS WEEK',
-                style: TextStyle(
-                  color: cx.textTertiary,
-                  fontSize: kMinFontSize,
-                  letterSpacing: 1.4,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(width: 10),
-              // Expanded + right-align rather than Spacer + intrinsic width:
-              // every trailing element here is text of unknown length, and on a
-              // 353dp phone the strip has ~287dp to play with.
-              if (stats.streakWeeks >= 2)
-                Expanded(
-                  child: Align(
-                    alignment: Alignment.centerRight,
-                    child: _StreakPill(weeks: stats.streakWeeks),
+    // Two plain lines, no card (spec 5.1). The old version wrapped this in a
+    // filled 16dp-radius card *and* labelled it THIS WEEK *and* repeated the
+    // unit — three layers of chrome around two facts. The unit now rides along
+    // with the number ("42.3 km this week"), which retires the label, and the
+    // trend arrow goes with it: the delta sentence already says which way.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            // Nested min-width Row so the number and its unit share a baseline;
+            // the streak can't join that baseline group because the Expanded
+            // between them has none.
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                Text(
+                  unit
+                      .distanceMeters(stats.distanceMeters)
+                      .toStringAsFixed(stats.distanceMeters >= 100000 ? 0 : 1),
+                  style: TextStyle(
+                    color: cx.accentInk,
+                    fontSize: 30,
+                    height: 1,
+                    fontWeight: FontWeight.w700,
+                    fontFeatures: kTabularFigures,
                   ),
                 ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.baseline,
-                textBaseline: TextBaseline.alphabetic,
-                children: [
-                  Text(
-                    unit
-                        .distanceMeters(stats.distanceMeters)
-                        .toStringAsFixed(stats.distanceMeters >= 100000 ? 0 : 1),
-                    style: TextStyle(
-                      color: cx.accentInk,
-                      fontSize: 34,
-                      height: 1,
-                      fontWeight: FontWeight.w700,
-                      fontFeatures: kTabularFigures,
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    unit.distanceLabel,
-                    style: TextStyle(color: cx.textDim, fontSize: 14),
-                  ),
-                ],
-              ),
-              const SizedBox(width: 10),
-              if (delta != null)
-                Expanded(
-                  child: Row(
-                    // Without `min` the nested Row claims the parent's whole
-                    // width and pushes itself off the right edge.
-                    mainAxisSize: MainAxisSize.min,
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      Icon(
-                        trendIcon,
-                        size: 15,
-                        color: up ? cx.positiveInk : cx.textDim,
-                      ),
-                      const SizedBox(width: 5),
-                      Flexible(
-                        child: Text(
-                          delta,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: up ? cx.positiveInk : cx.textDim,
-                            fontSize: kMinFontSize,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                const SizedBox(width: 7),
+                Text(
+                  '${unit.distanceLabel} this week',
+                  style: TextStyle(color: cx.textDim, fontSize: 13),
                 ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            stats.isEmpty
-                // An empty week is the one that most needs a sentence rather than
-                // a row of zeros — that was F5's lesson on the idle screen.
-                ? 'No rides yet this week.'
-                : '${_ridesLabel(stats.rideCount)} · '
-                    '${_fmtHours(stats.movingSeconds)} moving',
-            style: TextStyle(color: cx.textDim, fontSize: 13),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StreakPill extends StatelessWidget {
-  const _StreakPill({required this.weeks});
-
-  final int weeks;
-
-  @override
-  Widget build(BuildContext context) {
-    final cx = AppColors.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: cx.positive.withValues(alpha: cx.isDark ? 0.16 : 0.20),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.local_fire_department, size: 13, color: cx.positiveInk),
-          const SizedBox(width: 4),
-          // "wk", not "week": the pill shares a 287dp line with the section
-          // label, and the full word is what pushed it off the edge.
-          Text(
-            '$weeks wk streak',
-            style: TextStyle(
-              color: cx.positiveInk,
-              fontSize: kMinFontSize,
-              fontWeight: FontWeight.w700,
+              ],
             ),
+            const SizedBox(width: 10),
+            // Expanded + right-align rather than Spacer + intrinsic width:
+            // every trailing element here is text of unknown length, and on a
+            // 353dp phone the strip has ~287dp to play with.
+            if (stats.streakWeeks >= 2)
+              Expanded(
+                child: Text(
+                  '${stats.streakWeeks} wk streak',
+                  textAlign: TextAlign.right,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: cx.positiveInk,
+                    fontSize: kMinFontSize,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 7),
+        Text(
+          stats.isEmpty
+              // An empty week is the one that most needs a sentence rather than
+              // a row of zeros — that was F5's lesson on the idle screen.
+              ? 'No rides yet this week.'
+              : [
+                  _ridesLabel(stats.rideCount),
+                  '${_fmtHours(stats.movingSeconds)} moving',
+                  ?delta,
+                ].join(' · '),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            // One neutral colour for the whole line, including the delta (G2).
+            // The screen's single amber emphasis is the distance above; tinting
+            // the delta teal as well would make two things claim to be the
+            // point. The streak keeps its teal because it is the only *state*
+            // on the strip, not a restatement of the number.
+            color: cx.textDim,
+            fontSize: kMinFontSize,
+            fontWeight: FontWeight.w500,
+            fontFeatures: kTabularFigures,
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

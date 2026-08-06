@@ -162,55 +162,15 @@ class LiveSpeedChart extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(height: 8),
-          _legend(cx),
         ],
       ),
     );
   }
 
-  Widget _legend(AppPalette cx) {
-    Widget dot() => Container(
-          width: 14,
-          height: 14,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: cx.accent.withValues(alpha: 0.28),
-          ),
-          child: Center(
-            child: Container(
-              width: 7,
-              height: 7,
-              decoration:
-                  BoxDecoration(shape: BoxShape.circle, color: cx.accent),
-            ),
-          ),
-        );
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        dot(),
-        const SizedBox(width: 7),
-        Text(
-          'SPEED (${unit.speedLabel})',
-          style: TextStyle(
-            color: cx.textBright,
-            fontSize: 12,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.5,
-          ),
-        ),
-        const SizedBox(width: 14),
-        Text(
-          'DISTANCE (${unit.distanceLabel})',
-          style: TextStyle(
-            color: cx.textDim,
-            fontSize: 12,
-            letterSpacing: 0.5,
-          ),
-        ),
-      ],
-    );
-  }
+  // The legend row is gone (spec 7.7). A dot beside the word SPEED explained a
+  // single-series chart to itself: there was no second series to tell it apart
+  // from, and the axis captions already name both units. The chart's meaning is
+  // carried in prose by `ChartFrame`'s takeaway sentence, which is also what a
+  // screen reader is given — so nothing was lost but the row.
+
 }

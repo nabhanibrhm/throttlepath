@@ -236,9 +236,9 @@ class _StackedBar extends StatelessWidget {
   final int? selected;
   final ValueChanged<int> onTap;
 
-  /// A segment narrower than this share of the bar has no room for "12%" at the
-  /// 12sp floor, so it goes unlabelled.
-  static const double _labelFloor = 0.13;
+  // `_labelFloor` is gone with the in-bar percentages: it existed because a
+  // segment under ~13% of the width had no room for "12%" at the 12sp floor, and
+  // a 10dp-tall bar has no room for text at any width.
 
   @override
   Widget build(BuildContext context) {
@@ -248,12 +248,17 @@ class _StackedBar extends StatelessWidget {
     ];
     if (present.isEmpty) return const SizedBox.shrink();
 
+    // 10dp, was 44 (spec 7.8). At 44 this was a block of four colours competing
+    // with the table that says the same thing in words and numbers; at 10 it is
+    // the *proportion* at a glance and the table is the reading. The in-bar
+    // percentages went with the height — they are in the table already, and now
+    // at one decimal instead of two different roundings of one number.
     return Semantics(
       label: 'Speed zone distribution',
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(5),
         child: SizedBox(
-          height: 44,
+          height: 10,
           child: Row(
             children: [
               for (final i in present)
@@ -263,9 +268,7 @@ class _StackedBar extends StatelessWidget {
                   flex: (seconds[i] / total * 10000).round().clamp(1, 10000),
                   child: _Segment(
                     index: i,
-                    fraction: seconds[i] / total,
                     dimmed: selected != null && selected != i,
-                    labelled: seconds[i] / total >= _labelFloor,
                     onTap: () => onTap(i),
                   ),
                 ),
@@ -277,46 +280,27 @@ class _StackedBar extends StatelessWidget {
   }
 }
 
+/// One band of the bar. Still tappable — tapping a colour to highlight its row in
+/// the table below is the bar's only job now that it carries no text.
 class _Segment extends StatelessWidget {
   const _Segment({
     required this.index,
-    required this.fraction,
     required this.dimmed,
-    required this.labelled,
     required this.onTap,
   });
 
   final int index;
-  final double fraction;
   final bool dimmed;
-  final bool labelled;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final color = SpeedZoneChart.zoneColors[index];
     return GestureDetector(
       onTap: onTap,
       child: AnimatedOpacity(
         duration: const Duration(milliseconds: 160),
         opacity: dimmed ? 0.32 : 1,
-        child: Container(
-          color: color,
-          alignment: Alignment.center,
-          child: labelled
-              ? Text(
-                  '${(fraction * 100).round()}%',
-                  style: const TextStyle(
-                    // Fixed white: these four hues are theme-independent, so the
-                    // ink on top of them has to be too.
-                    color: Colors.white,
-                    fontSize: kMinFontSize,
-                    fontWeight: FontWeight.w800,
-                    fontFeatures: kTabularFigures,
-                  ),
-                )
-              : null,
-        ),
+        child: ColoredBox(color: SpeedZoneChart.zoneColors[index]),
       ),
     );
   }

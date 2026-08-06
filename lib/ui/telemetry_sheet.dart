@@ -21,6 +21,7 @@ import 'analog_speed_gauge.dart';
 import 'live_speed_announcer.dart';
 import 'ride_controls.dart';
 import 'ride_display_switcher.dart';
+import 'speed_sparkline.dart';
 import 'status_pills.dart';
 import 'tracking_map_screen.dart';
 import 'week_strip.dart';
@@ -245,11 +246,18 @@ class TelemetrySheet extends StatelessWidget {
   /// The big number. While counting down it is itself the skip target — the whole
   /// point of F10 is that the rider gets past this without hunting for a control.
   /// Opaque hit test so taps land in the gaps between the digits too.
+  ///
+  /// Once a ride has covered enough ground, the numeral shares its row with the
+  /// last few kilometres of speed (spec 4.1). The numeral says what the bike is
+  /// doing now; the line says what the road has been doing, which is the question
+  /// a single instantaneous figure can never answer.
   Widget _numeral(AppPalette cx, _SheetPhase p) {
-    final row = Row(
+    final digits = Row(
+      // Hugs its own width so the sparkline can have the rest; the whole row is
+      // centred instead when there is no trend to show.
+      mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.baseline,
       textBaseline: TextBaseline.alphabetic,
-      mainAxisAlignment: MainAxisAlignment.center,
       children: [
         Text(
           p.heroNumber,
@@ -259,9 +267,10 @@ class TelemetrySheet extends StatelessWidget {
                 : (p.frozen ? cx.textDim : cx.textBright),
             // The one hero on the screen (F14). Distance and elapsed sit a full
             // step below it, avg/peak two.
-            fontSize: p.countingDown ? 84 : 64,
+            fontSize: p.countingDown ? 84 : 74,
             height: 1,
-            fontWeight: FontWeight.w800,
+            fontWeight: FontWeight.w700,
+            letterSpacing: -2.6,
             // Without tabular digits this readout re-flows on every GPS tick as
             // "1" and "8" swap widths — the single worst thing you can do to a
             // number read in motion.
@@ -269,11 +278,11 @@ class TelemetrySheet extends StatelessWidget {
           ),
         ),
         if (!p.countingDown) ...[
-          const SizedBox(width: 8),
+          const SizedBox(width: 7),
           Padding(
-            padding: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.only(bottom: 10),
             child: Text(unit.speedLabel,
-                style: TextStyle(color: cx.textDim, fontSize: 18)),
+                style: TextStyle(color: cx.textDim, fontSize: 14)),
           ),
         ],
       ],
@@ -289,15 +298,37 @@ class TelemetrySheet extends StatelessWidget {
           button: true,
           label: 'Starting in ${p.heroNumber}',
           hint: 'Tap to skip the countdown',
-          child: ExcludeSemantics(child: row),
+          child: ExcludeSemantics(child: Center(child: digits)),
         ),
       );
     }
+
+    // Only while a ride is running, and only once there are two samples in the
+    // window — before that the "trend" is a dot, and the numeral should have the
+    // full width it has always had.
+    final showTrend = p.recording &&
+        SpeedSparkline.canDraw(state.speedSamples, unit);
+
     return LiveSpeedAnnouncer(
       speed: unit.speed(p.speedKmh),
       unitLabel: unit.speedLabel,
       active: p.recording && !p.frozen,
-      child: row,
+      child: showTrend
+          ? Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                digits,
+                const SizedBox(width: 14),
+                Expanded(
+                  child: SpeedSparkline(
+                    samples: state.speedSamples,
+                    unit: unit,
+                    dimmed: p.frozen,
+                  ),
+                ),
+              ],
+            )
+          : Center(child: digits),
     );
   }
 
@@ -619,6 +650,9 @@ class _ReferenceStats extends StatelessWidget {
 /// at, because the sheet is the one region present in *all* three backdrops —
 /// map, chart and hidden — so the context follows the rider instead of only
 /// appearing in battery-saver mode.
+/// Two lines, not four stacked blocks (spec 2.1). GPS state and the week's total
+/// share the first — one is a readiness check, the other a reason to ride, and
+/// neither needed a row to itself. The last ride keeps the second.
 class _IdleContext extends ConsumerWidget {
   const _IdleContext({required this.unit, required this.accuracyMeters});
 
@@ -627,23 +661,42 @@ class _IdleContext extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final cx = AppColors.of(context);
     final latest = ref.watch(latestRideProvider);
     final week = ref.watch(weekStatsProvider).valueOrNull;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _GpsReadinessRow(accuracyMeters: accuracyMeters),
-        const SizedBox(height: 12),
-        // The week's running total, one line (Phase 5.2, deferred here from 2.6).
-        // Reserved even while the query is in flight, for the same reason as the
-        // last-ride row below.
         SizedBox(
           height: 20,
-          child: week == null
-              ? null
-              : WeekStrip(stats: week, unit: unit, compact: true),
+          child: Row(
+            children: [
+              // Left: can this record right now. Flexible, because "Location
+              // permission needed" is the longest thing on the line and must not
+              // push the week total off the edge.
+              Flexible(child: _GpsReadinessRow(accuracyMeters: accuracyMeters)),
+              const SizedBox(width: 12),
+              // Right: the week so far, reduced to the figure. `WeekStrip`'s
+              // compact form carries a calendar icon and a delta as well, which
+              // is more than this line has room for beside a GPS state — so it
+              // reuses the strip's own formatter rather than reformatting or
+              // rounding the number differently.
+              if (week != null)
+                Text(
+                  '${WeekStrip.distanceText(week, unit)} this week',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: cx.textTertiary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    fontFeatures: kTabularFigures,
+                  ),
+                ),
+            ],
+          ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
         // Fixed height in every state — loading, empty and populated — so the
         // sheet doesn't jolt upward when the query lands a frame later.
         SizedBox(
@@ -718,14 +771,16 @@ class _GpsReadinessRowState extends State<_GpsReadinessRow> {
           : (cx.positiveInk, 'Location on — GPS locks at start'),
     };
     return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
+      // Hugs its content: it shares a line with the week total now, so it takes
+      // the width it needs and leaves the rest rather than centring in it.
+      mainAxisSize: MainAxisSize.min,
       children: [
         Container(
-          width: 8,
-          height: 8,
+          width: 7,
+          height: 7,
           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: 7),
         Flexible(
           child: Text(
             label,
@@ -734,7 +789,7 @@ class _GpsReadinessRowState extends State<_GpsReadinessRow> {
             style: TextStyle(
               color: color,
               fontSize: 13,
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w500,
               fontFeatures: kTabularFigures,
             ),
           ),
@@ -744,8 +799,12 @@ class _GpsReadinessRowState extends State<_GpsReadinessRow> {
   }
 }
 
-/// One quiet two-line recap of the previous ride, or an invitation when there
-/// isn't one yet. Both states share a shape so the sheet stays put.
+/// One quiet line recapping the previous ride, or an invitation when there isn't
+/// one yet. Both states share a shape so the sheet stays put.
+///
+/// Was two lines with its own `LAST RIDE` heading above the detail (spec 2.1
+/// line C). The label is inline now and reads `LAST`, which is enough beside a
+/// ride name and a date, and the row costs half the height.
 class _LastRideRow extends StatelessWidget {
   const _LastRideRow({required this.ride, required this.unit});
 
@@ -753,66 +812,65 @@ class _LastRideRow extends StatelessWidget {
   final SpeedUnit unit;
 
   /// Reserved height, so loading / empty / populated are all the same size.
-  static const double height = 38;
+  static const double height = 20;
 
   @override
   Widget build(BuildContext context) {
     final cx = AppColors.of(context);
     final r = ride;
-
-    final String heading;
-    final String? trailing;
-    final String detail;
-    if (r == null) {
-      heading = 'NO RIDES YET';
-      trailing = null;
-      detail = 'Press START to record your first.';
-    } else {
-      final when = r.startTime.toLocal();
-      heading = 'LAST RIDE';
-      trailing = '${shortMonth(when.month)} ${when.day}';
-      final distance =
-          unit.distanceMeters(r.totalDistanceMeters).toStringAsFixed(2);
-      final minutes = (r.durationSeconds / 60).round();
-      final name = r.name?.trim();
-      final parts = [
-        if (name != null && name.isNotEmpty) name,
-        '$distance ${unit.distanceLabel}',
-        '$minutes min',
-      ];
-      detail = parts.join(' · ');
-    }
-
     final labelStyle = TextStyle(
       color: cx.textTertiary,
       fontSize: kMinFontSize,
-      letterSpacing: 1.0,
+      letterSpacing: 1.3,
       fontWeight: FontWeight.w600,
     );
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          children: [
-            Text(heading, style: labelStyle),
-            const Spacer(),
-            if (trailing != null) Text(trailing, style: labelStyle),
-          ],
+    // Nothing recorded yet: the invitation is the whole line — a `LAST` label
+    // with nothing after it would be worse than no label.
+    if (r == null) {
+      return Text(
+        'Press START to record your first ride.',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: cx.textDim,
+          fontSize: 13,
+          fontWeight: FontWeight.w500,
         ),
-        const SizedBox(height: 3),
-        Text(
-          detail,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: r == null ? cx.textDim : cx.textBright,
-            fontSize: 14,
-            fontWeight: r == null ? FontWeight.w500 : FontWeight.w700,
-            fontFeatures: kTabularFigures,
+      );
+    }
+
+    final when = r.startTime.toLocal();
+    final distance =
+        unit.distanceMeters(r.totalDistanceMeters).toStringAsFixed(2);
+    final minutes = (r.durationSeconds / 60).round();
+    final name = r.name?.trim();
+    final detail = [
+      if (name != null && name.isNotEmpty) name,
+      '$distance ${unit.distanceLabel}',
+      '$minutes min',
+    ].join(' · ');
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Text('LAST', style: labelStyle),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            detail,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: cx.textDim,
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              fontFeatures: kTabularFigures,
+            ),
           ),
         ),
+        const SizedBox(width: 8),
+        Text('${shortMonth(when.month)} ${when.day}', style: labelStyle),
       ],
     );
   }

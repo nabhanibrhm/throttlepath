@@ -160,10 +160,17 @@ void main() {
     test('the type scale exists and respects the 12sp floor', () {
       for (final build in [buildDarkTheme, buildLightTheme]) {
         final text = build().textTheme;
-        expect(text.displayLarge!.fontSize, 64);
-        expect(text.displayMedium!.fontSize, 34);
+        expect(text.displayLarge!.fontSize, 74);
+        expect(text.displayMedium!.fontSize, 46);
+        expect(text.titleLarge!.fontSize, 21);
+        expect(text.headlineSmall!.fontSize, 18);
         expect(text.titleMedium!.fontSize, 15);
-        expect(text.bodyMedium!.fontSize, 13);
+        expect(text.bodyMedium!.fontSize, 14);
+        // The minimal-look spec asked for 11.5sp metadata and 10sp all-caps
+        // section labels. Both are clamped to the floor here on purpose — see
+        // kMinFontSize. If either of these ever reads 11.5 or 10, that decision
+        // was reversed by accident.
+        expect(text.bodySmall!.fontSize, kMinFontSize);
         expect(text.labelSmall!.fontSize, kMinFontSize);
       }
     });
@@ -215,6 +222,9 @@ void main() {
         text.displayLarge,
         text.displayMedium,
         text.headlineSmall,
+        // The metadata line is mostly numbers — a date, a duration, two speeds —
+        // so it re-flows on every rebuild without this.
+        text.bodySmall,
       ]) {
         expect(style!.fontFeatures, contains(const FontFeature.tabularFigures()));
       }
