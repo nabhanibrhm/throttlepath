@@ -1,9 +1,14 @@
-/// The two ways this app writes an elapsed time — and the reason there are two.
+/// How this app writes a time: two elapsed durations and one rate.
 ///
-/// Both were previously re-declared, identically, in nearly every screen that
-/// shows a time, which is how the two variants below came to differ by accident
-/// rather than on purpose. They are genuinely different jobs, so they get
-/// different names here instead of one function with a flag.
+/// The two durations were previously re-declared, identically, in nearly every
+/// screen that shows a time, which is how they came to differ by accident rather
+/// than on purpose. They are genuinely different jobs, so they get different
+/// names here instead of one function with a flag.
+///
+/// [formatPace] is the odd one out and worth naming as such: it reads as `m:ss`
+/// like the others but it is minutes *per distance unit*, not minutes elapsed.
+/// It lives here because that is where a reader looks for `m:ss`, and because its
+/// edge cases are arithmetic rather than presentation.
 library;
 
 String _two(int n) => n.toString().padLeft(2, '0');
@@ -32,4 +37,32 @@ String formatClock(int seconds) {
   final m = (seconds % 3600) ~/ 60;
   final s = seconds % 60;
   return h > 0 ? '$h:${_two(m)}:${_two(s)}' : '$m:${_two(s)}';
+}
+
+/// `m:ss` per displayed distance unit — a **rate**, not a duration.
+///
+/// [displayDistance] is already in the rider's unit (km or mi), so this returns
+/// minutes per km or per mile without needing to know which. Computed against
+/// *moving* time, so a long stop at a warung doesn't make the ride look slow.
+///
+/// `'--:--'` rather than a number in three cases, each a different way the answer
+/// would be a lie:
+///  - under 50 m ridden, where a second either way swings the figure by minutes;
+///  - no moving time at all, which would divide by zero;
+///  - a non-finite result, belt-and-braces for a distance that underflows the
+///    first guard.
+///
+/// The `ss == 60` carry is not paranoia: `(secPerUnit % 60).round()` rounds *up*
+/// to 60 for anything from 59.5 seconds, and `4:60` is not a pace.
+String formatPace(int movingSeconds, double displayDistance) {
+  if (displayDistance < 0.05 || movingSeconds <= 0) return '--:--';
+  final secPerUnit = movingSeconds / displayDistance;
+  if (!secPerUnit.isFinite) return '--:--';
+  var mm = secPerUnit ~/ 60;
+  var ss = (secPerUnit % 60).round();
+  if (ss == 60) {
+    ss = 0;
+    mm += 1;
+  }
+  return '$mm:${_two(ss)}';
 }

@@ -236,9 +236,9 @@ class _StackedBar extends StatelessWidget {
   final int? selected;
   final ValueChanged<int> onTap;
 
-  // `_labelFloor` is gone with the in-bar percentages: it existed because a
-  // segment under ~13% of the width had no room for "12%" at the 12sp floor, and
-  // a 10dp-tall bar has no room for text at any width.
+  /// A segment narrower than this share of the bar has no room for "12%" at the
+  /// 12sp floor, so it goes unlabelled.
+  static const double _labelFloor = 0.13;
 
   @override
   Widget build(BuildContext context) {
@@ -248,17 +248,19 @@ class _StackedBar extends StatelessWidget {
     ];
     if (present.isEmpty) return const SizedBox.shrink();
 
-    // 10dp, was 44 (spec 7.8). At 44 this was a block of four colours competing
-    // with the table that says the same thing in words and numbers; at 10 it is
-    // the *proportion* at a glance and the table is the reading. The in-bar
-    // percentages went with the height — they are in the table already, and now
-    // at one decimal instead of two different roundings of one number.
+    // 44dp with the percentages inside it. The minimal pass took this to a bare
+    // 10dp strip on the argument that the table below says the same thing in
+    // words — but on the phone that strip read as a decoration under the
+    // heading rather than as the chart, and the tab's whole answer moved into a
+    // list of numbers. Height is what makes it a chart: at 44 the four shares
+    // are comparable by eye and the table becomes the precise reading, which is
+    // the split the two are supposed to have.
     return Semantics(
       label: 'Speed zone distribution',
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(5),
+        borderRadius: BorderRadius.circular(8),
         child: SizedBox(
-          height: 10,
+          height: 44,
           child: Row(
             children: [
               for (final i in present)
@@ -268,7 +270,9 @@ class _StackedBar extends StatelessWidget {
                   flex: (seconds[i] / total * 10000).round().clamp(1, 10000),
                   child: _Segment(
                     index: i,
+                    fraction: seconds[i] / total,
                     dimmed: selected != null && selected != i,
+                    labelled: seconds[i] / total >= _labelFloor,
                     onTap: () => onTap(i),
                   ),
                 ),
@@ -280,27 +284,54 @@ class _StackedBar extends StatelessWidget {
   }
 }
 
-/// One band of the bar. Still tappable — tapping a colour to highlight its row in
-/// the table below is the bar's only job now that it carries no text.
+/// One band of the bar: its colour, its share written inside it when it is wide
+/// enough, and a tap that highlights its row in the table below.
 class _Segment extends StatelessWidget {
   const _Segment({
     required this.index,
+    required this.fraction,
     required this.dimmed,
+    required this.labelled,
     required this.onTap,
   });
 
   final int index;
+  final double fraction;
   final bool dimmed;
+  final bool labelled;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
+    final color = SpeedZoneChart.zoneColors[index];
     return GestureDetector(
       onTap: onTap,
       child: AnimatedOpacity(
         duration: const Duration(milliseconds: 160),
         opacity: dimmed ? 0.32 : 1,
-        child: ColoredBox(color: SpeedZoneChart.zoneColors[index]),
+        child: Container(
+          color: color,
+          alignment: Alignment.center,
+          child: labelled
+              // Silent to a screen reader: the table underneath reads out the
+              // same four shares to one decimal, and without this the bar
+              // announces "Speed zone distribution, 22%, 51%, 27%" first — the
+              // same numbers twice, the rounder pass first.
+              ? ExcludeSemantics(
+                  child: Text(
+                    '${(fraction * 100).round()}%',
+                    style: const TextStyle(
+                      // Fixed white: these four hues are theme-independent, so
+                      // the ink on top of them has to be too.
+                      color: Colors.white,
+                      fontSize: kMinFontSize,
+                      fontWeight: FontWeight.w800,
+                      fontFeatures: kTabularFigures,
+                    ),
+                  ),
+                )
+              : null,
+        ),
       ),
     );
   }

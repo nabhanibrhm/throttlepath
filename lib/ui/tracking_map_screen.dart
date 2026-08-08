@@ -459,6 +459,17 @@ class _TrackingMapScreenState extends ConsumerState<TrackingMapScreen> {
       // ride existed. Same reason `home_shell` invalidates on tab entry.
       ref.invalidate(weekStatsProvider);
       ref.invalidate(latestRideProvider);
+      // Same trap, worse symptom. `nearbyOpenTripProvider` is `autoDispose` too,
+      // and this screen watches it for the app's whole life — so it ran once at
+      // launch and served that one answer forever. Finishing a trip then left the
+      // banner offering to continue the trip just finished.
+      //
+      // Unconditional on purpose: the answer is as much a function of *where the
+      // rider is* as of which trips are open, and after any ride they are
+      // somewhere else. This is also what makes the nudge work as designed for
+      // the first time — it could previously only ever fire about the position
+      // held at launch.
+      ref.invalidate(nearbyOpenTripProvider);
     });
   }
 
@@ -521,6 +532,123 @@ class _MapAttribution extends StatelessWidget {
   }
 }
 
+/// Chrome shared by both top banners: the telemetry sheet's mirror image (D-5).
+///
+/// Both used to be glass — a rounded floating card, 12-sigma `BackdropFilter`,
+/// an 82%-opaque fill and a half-alpha amber outline. Two objections, one
+/// visual and one mechanical. The sheet at the other end of the same screen
+/// already solves "readable content over a live map" and solves it opaquely, so
+/// the two ends of the Record screen were arguing; and a blur is a per-frame
+/// filter over a moving map, paid on every frame the banner is up.
+///
+/// So: opaque `surface`, one hairline on the edge facing the map, full-bleed,
+/// and the corners rounded on that edge only — the sheet's shape upside down.
+/// Four nested widgets become two.
+///
+/// [measureKey] must stay on the outermost box below the `SafeArea`: it feeds
+/// `_measureBanner()` → `topInset`, which is what keeps the banner off the chart
+/// and lean backdrops. Moving it inward silently re-breaks that.
+class _TopBanner extends StatelessWidget {
+  const _TopBanner({required this.measureKey, required this.child});
+
+  final GlobalKey measureKey;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final cx = AppColors.of(context);
+    return Positioned(
+      top: 0,
+      left: 0,
+      right: 0,
+      child: SafeArea(
+        bottom: false,
+        child: Container(
+          key: measureKey,
+          padding: const EdgeInsets.fromLTRB(20, 12, 12, 12),
+          decoration: BoxDecoration(
+            color: cx.surface,
+            borderRadius:
+                const BorderRadius.vertical(bottom: Radius.circular(24)),
+            border: Border(bottom: BorderSide(color: cx.border)),
+          ),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+/// The banner's two stacked lines: what this is, then which trip.
+///
+/// No leading icon, per the same rule that stripped them from the settings rows
+/// — `alt_route` beside the words "CONTINUING TRIP" told a rider nothing the
+/// words didn't, and in amber it was a second accent on a screen that is allowed
+/// one. The label takes the app's own section-label style rather than a private
+/// 12sp/1.5 spacing that happened to look similar.
+class _BannerText extends StatelessWidget {
+  const _BannerText({required this.label, required this.title});
+
+  final String label;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(label, style: t.labelSmall),
+        const SizedBox(height: 3),
+        Text(
+          title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: t.titleMedium,
+        ),
+      ],
+    );
+  }
+}
+
+/// A banner action. Amber as *ink*, never as a fill: the Record screen gets one
+/// amber fill and it belongs to START.
+class _BannerAction extends StatelessWidget {
+  const _BannerAction({
+    required this.label,
+    required this.onPressed,
+    this.emphasis = false,
+  });
+
+  final String label;
+  final VoidCallback onPressed;
+
+  /// The affirmative of a pair — carries the accent; the other stays dim.
+  final bool emphasis;
+
+  @override
+  Widget build(BuildContext context) {
+    final cx = AppColors.of(context);
+    return TextButton(
+      onPressed: onPressed,
+      style: TextButton.styleFrom(
+        foregroundColor: emphasis ? cx.accentInk : cx.textDim,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        minimumSize: const Size(0, 44),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 13,
+          fontWeight: emphasis ? FontWeight.w700 : FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
 /// Top banner shown while a trip continuation is pending — names the trip the
 /// next recording will join and offers a cancel (ride standalone instead).
 class _ContinuingTripBanner extends StatelessWidget {
@@ -538,77 +666,19 @@ class _ContinuingTripBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cx = AppColors.of(context);
     final name = tripName?.trim();
-    return Positioned(
-      top: 0,
-      left: 0,
-      right: 0,
-      child: SafeArea(
-        child: Padding(
-          key: measureKey,
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(14),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                decoration: BoxDecoration(
-                  color: cx.surface.withValues(alpha: 0.82),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: cx.accentInk.withValues(alpha: 0.5)),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.alt_route, color: cx.accentInk, size: 18),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            'CONTINUING TRIP',
-                            style: TextStyle(
-                              color: cx.accentInk,
-                              fontSize: 12,
-                              letterSpacing: 1.5,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                          const SizedBox(height: 1),
-                          Text(
-                            name?.isNotEmpty == true ? name! : 'Untitled trip',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: cx.textBright,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: onCancel,
-                      style: TextButton.styleFrom(
-                        foregroundColor: cx.textDim,
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        minimumSize: const Size(0, 36),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      child: const Text('Cancel',
-                          style: TextStyle(
-                              fontSize: 13, fontWeight: FontWeight.w600)),
-                    ),
-                  ],
-                ),
-              ),
+    return _TopBanner(
+      measureKey: measureKey,
+      child: Row(
+        children: [
+          Expanded(
+            child: _BannerText(
+              label: 'CONTINUING TRIP',
+              title: name?.isNotEmpty == true ? name! : 'Untitled trip',
             ),
           ),
-        ),
+          _BannerAction(label: 'Cancel', onPressed: onCancel),
+        ],
       ),
     );
   }
@@ -632,94 +702,25 @@ class _NearbyTripBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cx = AppColors.of(context);
     final name = tripName?.trim();
-    return Positioned(
-      top: 0,
-      left: 0,
-      right: 0,
-      child: SafeArea(
-        child: Padding(
-          key: measureKey,
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(14),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
-                decoration: BoxDecoration(
-                  color: cx.surface.withValues(alpha: 0.82),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: cx.accentInk.withValues(alpha: 0.5)),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.near_me, color: cx.accentInk, size: 18),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            'NEAR A TRIP’S END',
-                            style: TextStyle(
-                              color: cx.accentInk,
-                              fontSize: 12,
-                              letterSpacing: 1.5,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                          const SizedBox(height: 1),
-                          Text(
-                            'Continue ${name?.isNotEmpty == true ? '“$name”' : 'your trip'}?',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: cx.textBright,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: onDismiss,
-                      style: TextButton.styleFrom(
-                        foregroundColor: cx.textDim,
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        minimumSize: const Size(0, 36),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      child: const Text('Not now',
-                          style: TextStyle(
-                              fontSize: 13, fontWeight: FontWeight.w600)),
-                    ),
-                    const SizedBox(width: 2),
-                    ElevatedButton(
-                      onPressed: onContinue,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: cx.accent,
-                        foregroundColor: cx.onAccent,
-                        elevation: 0,
-                        padding: const EdgeInsets.symmetric(horizontal: 14),
-                        minimumSize: const Size(0, 38),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
-                      ),
-                      child: const Text('Continue',
-                          style: TextStyle(
-                              fontSize: 13, fontWeight: FontWeight.w800)),
-                    ),
-                  ],
-                ),
-              ),
+    return _TopBanner(
+      measureKey: measureKey,
+      child: Row(
+        children: [
+          Expanded(
+            child: _BannerText(
+              label: 'NEAR A TRIP’S END',
+              title:
+                  'Continue ${name?.isNotEmpty == true ? '“$name”' : 'your trip'}?',
             ),
           ),
-        ),
+          _BannerAction(label: 'Not now', onPressed: onDismiss),
+          _BannerAction(
+            label: 'Continue',
+            onPressed: onContinue,
+            emphasis: true,
+          ),
+        ],
       ),
     );
   }

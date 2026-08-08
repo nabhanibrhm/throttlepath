@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../core/record_view.dart';
 import '../core/speed_gauge_style.dart';
@@ -191,3 +192,28 @@ final ttffSamplesProvider =
     StateNotifierProvider<TtffSamplesController, List<int>>(
   (ref) => TtffSamplesController(),
 );
+
+/// The version the build actually stamped, for the Settings "About" row.
+///
+/// Read from the package manifest rather than typed into the widget: the row
+/// said `1.0.0` for the whole of 1.1.0 because a string a human has to remember
+/// to bump is a string that goes stale, and this one is what a rider would quote
+/// in a bug report.
+///
+/// Self-loading rather than seeded from `main()`, for [TtffSamplesController]'s
+/// reason: `main()`'s pref `.wait` exists to stop a flash of the wrong theme or
+/// unit on the *first frame*, and the version has no such stake — nothing reads
+/// it until a rider has navigated to a tab two taps away.
+///
+/// `null` on failure is load-bearing, not defensive noise: the plugin registrant
+/// does not run under `flutter test`, so `fromPlatform()` throws
+/// `MissingPluginException` in every widget test that pumps `SettingsScreen`.
+/// The row renders null as *say nothing* — never as a placeholder like `0.0.0`,
+/// which would be a wrong answer where no answer is the honest one.
+final appVersionProvider = FutureProvider<String?>((ref) async {
+  try {
+    return (await PackageInfo.fromPlatform()).version;
+  } catch (_) {
+    return null;
+  }
+});

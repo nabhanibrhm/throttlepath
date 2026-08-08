@@ -50,6 +50,12 @@ dependencies:
   # mounted phone stays readable mid-ride.
   wakelock_plus: ^1.7.0
 
+  # --- App metadata ---
+  # Already resolved transitively (via wakelock_plus) and already a registered
+  # native plugin, so this line adds no native code — it exists so the Settings
+  # About row may import it without tripping `depend_on_referenced_packages`.
+  package_info_plus: ^10.2.0
+
   # --- Typography ---
   # Inter (UI) + JetBrains Mono (legacy) are bundled as assets (see `flutter.fonts`
   # below) rather than fetched at runtime, so type renders offline from first launch.

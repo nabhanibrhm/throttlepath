@@ -104,6 +104,21 @@ class _TripDetailScreenState extends ConsumerState<TripDetailScreen> {
     setState(() => _busy = true);
     await DatabaseService.instance.finishTrip(widget.trip.id);
     _invalidateHistory();
+    // A continuation armed for *this* trip is now pointing at a finished one,
+    // and `_resolveTripId` hands back `continuingTripId` without asking whether
+    // the trip still accepts stints — so the next ride would be filed into a
+    // closed trip. A data bug, not a stale banner.
+    //
+    // Guarded on the id: a continuation armed for some *other* trip is still
+    // perfectly valid and must survive finishing this one.
+    if (ref.read(trackingControllerProvider).continuingTripId ==
+        widget.trip.id) {
+      ref.read(trackingControllerProvider.notifier).cancelContinuation();
+    }
+    // Not folded into `_invalidateHistory()`: that also runs from `_renameTrip`
+    // and `_renameStint`, and this provider costs a GPS fix. Renaming a trip
+    // should not wake the receiver.
+    ref.invalidate(nearbyOpenTripProvider);
     if (mounted) {
       setState(() {
         _finishedAt = DateTime.now();

@@ -119,7 +119,12 @@ class AppPalette extends ThemeExtension<AppPalette> {
     canvas: Color(0xFFFAFAF7),
     surface: Color(0xFFFFFFFF),
     surfaceRaised: Color(0xFFFFFFFF), // white is the ceiling; [border] elevates
-    border: Color(0xFFE2E2DE), // #ECECEC barely separated canvas from card
+    // Judged by ΔL*, not by WCAG ratio: the ratio formula compresses hard at the
+    // white end, so #E2E2DE's 1.24:1 looked comparable on paper to the dark
+    // theme's 1.43:1 while reading visibly fainter on the phone. In ΔL* it was
+    // 8.4 against dark's 14.5 — barely half the weight. #D4D4CE lands at 13.4,
+    // which is the weight this app already agreed reads as a hairline.
+    border: Color(0xFFD4D4CE),
     textBright: Color(0xFF1A1A1A),
     textDim: Color(0xFF6E6E6E),
     textTertiary: Color(0xFF737373),

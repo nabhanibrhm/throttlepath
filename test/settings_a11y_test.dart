@@ -51,14 +51,20 @@ void useTallSurface(WidgetTester t) {
   addTearDown(t.view.reset);
 }
 
+/// [version] left null deliberately means *no override*, so the About row runs
+/// against the real `appVersionProvider` — which under `flutter test` hits an
+/// unregistered plugin and takes its `catch`. That is the path most of this file
+/// exercises incidentally, and one test below asserts on purpose.
 Widget host({
   ThemeData? theme,
   double textScale = 1.0,
   ThemeMode mode = ThemeMode.dark,
+  String? version,
 }) {
   return ProviderScope(
     overrides: [
       themeModeProvider.overrideWith((ref) => ThemeModeController(mode)),
+      if (version != null) appVersionProvider.overrideWith((ref) => version),
     ],
     child: MaterialApp(
       theme: theme ?? buildDarkTheme(),
@@ -251,6 +257,36 @@ void main() {
         expect(t.getTopLeft(icons.at(i)).dx, greaterThan(176),
             reason: 'an icon is back in the leading tile position');
       }
+    });
+  });
+
+  group('about', () {
+    testWidgets('the version is read from the build, not typed into the row',
+        (t) async {
+      useTallSurface(t);
+      await t.pumpWidget(host(version: '9.9.9'));
+      await t.pumpAndSettle();
+
+      // Asserting the *real* version here would re-hardcode the bug one layer
+      // down: `1.0.0` sat in this row for the whole of 1.1.0 precisely because
+      // shipping a new version meant remembering to retype a string.
+      expect(find.textContaining('Version 9.9.9'), findsOneWidget);
+      expect(find.textContaining('1.0.0'), findsNothing);
+    });
+
+    testWidgets('a platform that will not answer says nothing, not a placeholder',
+        (t) async {
+      // No override, so `PackageInfo.fromPlatform()` throws — the same shape as
+      // any platform with no manifest to read. The row has to drop the version
+      // rather than invent one, because a wrong version in a bug report is worse
+      // than none.
+      useTallSurface(t);
+      await t.pumpWidget(host());
+      await t.pumpAndSettle();
+
+      expect(find.text('Rides are stored on this phone only.'), findsOneWidget);
+      expect(find.textContaining('Version'), findsNothing);
+      expect(takeCapturedExceptions(), isEmpty);
     });
   });
 

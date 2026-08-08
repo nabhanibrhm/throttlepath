@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../core/date_format.dart';
 import '../core/duration_format.dart';
 import '../core/speed_palette.dart';
+import '../core/track_runs.dart';
 import '../core/units.dart';
 import '../data/models/ride.dart';
 import '../data/models/track_point.dart';
@@ -15,12 +16,16 @@ import '../data/models/track_point.dart';
 /// All render on a fully transparent canvas (no background panel or map tiles) so
 /// the sticker drops cleanly onto a photo/video or saves as a transparent PNG.
 ///
-/// **The minimal-look spec assumed an opaque `#0E0E0F` card at 1080×1350.** Both
-/// are wrong about this app: the canvas is transparent by design — that is what
-/// makes these stickers rather than images — and it is 360×640 logical, exported
-/// at 1080×1920 (9:16, Story). The spec's *compositions* are applied below; its
-/// background and its aspect ratio are not, because changing either is a product
-/// decision about what a shared ride is, not a restyle.
+/// **The minimal-look spec assumed an opaque `#0E0E0F` card at 1080×1350.** The
+/// background is still wrong about this app — the canvas is transparent by
+/// design, which is what makes these stickers rather than images.
+///
+/// The aspect ratio is no longer a disagreement. This was 9:16 (360×640 logical,
+/// 1080×1920 exported) on the argument that a Story is 9:16, and that argument
+/// was about the canvas a sticker *lands on*, not the sticker: a sticker is
+/// scaled and placed by hand, so a tall one cannot fill a Story it does not own
+/// and crops badly everywhere else. It is square now — see [ShareCard.canvasSize],
+/// which is the one number all three call sites read.
 enum ShareLayout {
   /// Route down the left at full height, stats in a right-hand column under a
   /// promoted distance.
@@ -35,9 +40,11 @@ enum ShareLayout {
   /// Speed-coloured route with a slim vertical scale beside it; max speed leads.
   speed('Speed map', 'Route coloured by speed'),
 
-  /// Route edge to edge and clipped, stats in a gradient foot. The only one that
-  /// reads at thumbnail size.
-  fullBleed('Full bleed', 'Route edge to edge'),
+  // `fullBleed` — route edge to edge under a gradient scrim — is gone. It was the
+  // one card that carried a background, which on a transparent sticker meant a
+  // dark bar the rider could not remove; and it scaled the route to *cover* the
+  // frame, so the shape it showed was a crop of the ride rather than the ride.
+  // Six styles that agree on what a route looks like beat seven that don't.
 
   /// A ride stub: start and end places, the route between two dashed rules.
   ticket('Ticket', 'Start to end, as a stub'),
@@ -51,8 +58,8 @@ enum ShareLayout {
   final String blurb;
 }
 
-/// A shareable ride card, rendered off-screen into a 9:16 PNG (see
-/// [captureWidgetToPng]).
+/// A shareable ride card, rendered off-screen into a square PNG at [canvasSize]
+/// (see `captureWidgetToPng`).
 ///
 /// Styled after Strava's share sticker: a fully transparent canvas with the
 /// route line and stats floating directly on it (no map tiles — ThrottlePath is
@@ -81,20 +88,37 @@ class ShareCard extends StatelessWidget {
 
   /// Indices into [points] where each stint (after the first) begins — set when
   /// this card renders a whole multi-stint trip so the route draws each stint as a
-  /// separate colored polyline instead of one line with false join connectors.
-  /// Empty for a single ride.
+  /// separate polyline instead of one line with false join connectors. All of them
+  /// paint in the brand amber; the card does not colour-code its stints the way
+  /// the Trip screen does. Empty for a single ride.
   final List<int> stintStarts;
 
   /// Bundled brand mark — clean amber speedometer on transparent. Precached
   /// before capture (the render only waits a couple of frames).
   static const brandLogo = AssetImage('assets/icon/logo_foreground.png');
 
+  /// The sticker's logical canvas, exported at 1080×1080 (`RideShare._pixelRatio`).
+  ///
+  /// The card sizes *itself* to this instead of trusting each caller to wrap it.
+  /// The old 360×640 pair lived in three places — the capture, the composer
+  /// preview and the test host — and a card whose shape depends on where it is
+  /// mounted is a card that can export as something other than what the rider
+  /// approved. Both remaining callers hand it unbounded or loose constraints, so
+  /// this is now the only copy.
+  static const Size canvasSize = Size(360, 360);
+
   // Brand colours, fixed for the shared artwork.
   static const _amber = Color(0xFFFFB22C);
   static const _ink = Color(0xFFF2F2F0);
   static const _dim = Color(0xFFD8D8D8);
 
-  /// Label grey — the wordmark and the small stat captions.
+  /// Recessive grey — the rules, and the timestamps that date a card.
+  ///
+  /// It used to carry the labels and the wordmark too; those are amber now (see
+  /// [_labelStyle]). What is left is the stuff that should *not* be found: a
+  /// hairline is furniture, and the stamp is provenance rather than a stat, which
+  /// is why the Ticket has paired an amber `RIDE LOG` against a grey stamp in the
+  /// same row from the start.
   static const _muted = Color(0xFF8A8A8A);
 
   /// Stands in for a background panel: keeps text readable over an arbitrary
@@ -103,9 +127,12 @@ class ShareCard extends StatelessWidget {
     Shadow(color: Color(0xE6000000), blurRadius: 10, offset: Offset(0, 2)),
   ];
 
-  /// Inset from the sticker's edge. Every layout but [ShareLayout.fullBleed]
-  /// applies it to the whole card; that one applies it only to its foot.
-  static const double _pad = 22;
+  /// Inset from the sticker's edge, applied to the whole card.
+  ///
+  /// 18, not the 22 the 9:16 card used: the two margins were 6.9% of a 640dp
+  /// height and would be 12% of a 360dp one. Margin did not become more important
+  /// when the canvas got shorter — the route inside it became scarcer.
+  static const double _pad = 18;
 
   @override
   Widget build(BuildContext context) {
@@ -114,7 +141,6 @@ class ShareCard extends StatelessWidget {
       ShareLayout.stacked => _buildStacked(),
       ShareLayout.statsTop => _buildStatsTop(),
       ShareLayout.speed => _buildSpeed(),
-      ShareLayout.fullBleed => _buildFullBleed(),
       ShareLayout.ticket => _buildTicket(),
       ShareLayout.trace => _buildTrace(),
     };
@@ -125,16 +151,13 @@ class ShareCard extends StatelessWidget {
         color: _ink,
         shadows: _textShadow,
       ),
-      child: SizedBox(
-        width: 360,
-        height: 640,
+      child: SizedBox.fromSize(
+        size: canvasSize,
         // Full-frame, not centred. Every layout used to float a min-height column
         // in the middle of the canvas, which is why the wordmark appeared to hover
         // mid-card (spec 9.1) — it was simply the last item in a short column. The
         // layouts now fill the height and anchor their own feet.
-        child: layout == ShareLayout.fullBleed
-            ? content
-            : Padding(padding: const EdgeInsets.all(_pad), child: content),
+        child: Padding(padding: const EdgeInsets.all(_pad), child: content),
       ),
     );
   }
@@ -150,7 +173,7 @@ class ShareCard extends StatelessWidget {
               // Route takes the full height of the frame rather than sitting in a
               // 210dp box floated mid-card.
               Expanded(child: _route()),
-              const SizedBox(width: 18),
+              const SizedBox(width: 14),
               SizedBox(
                 width: 104,
                 child: Column(
@@ -161,11 +184,18 @@ class ShareCard extends StatelessWidget {
                     const SizedBox(height: 12),
                     _rule(),
                     const SizedBox(height: 12),
-                    // Five stats, not six: PACE is gone (spec 9.4). It is a
-                    // running metric — minutes per kilometre means nothing at 60
-                    // km/h — and it was the sixth thing competing to be read.
+                    // PACE is back, against spec 9.4. 9.4 dropped it as a running
+                    // metric and as the sixth number competing to be read; the
+                    // second half was the real argument and it no longer holds —
+                    // these are six quiet `_statLine` rows under one amber hero in
+                    // a 296dp column, not six things shouting. The first half is
+                    // wrong about riders: minutes per kilometre is exactly how a
+                    // commute is compared to the same commute last week, which is
+                    // the comparison a shared card is *for*. It sits after MOVING
+                    // because that is what it is derived from.
                     _statLine('TIME', _totalTime),
                     _statLine('MOVING', _movingTime),
+                    _statLine('PACE', '$_pace /$_dLabel'),
                     _statLine('AVG', '$_avg $_sLabel'),
                     _statLine('MAX', '$_max $_sLabel'),
                   ],
@@ -207,7 +237,7 @@ class ShareCard extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _hero(_distance, _dLabel, size: 44),
+        _hero(_distance, _dLabel, size: 40),
         const SizedBox(height: 12),
         _rule(),
         const SizedBox(height: 11),
@@ -232,7 +262,7 @@ class ShareCard extends StatelessWidget {
           child: Row(
             children: [
               Expanded(child: _route(colorBySpeed: true)),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               // The legend is a slim vertical scale beside the route now, not a
               // panel overlapping it (spec's Speed map row).
               _verticalSpeedScale(),
@@ -252,55 +282,6 @@ class ShareCard extends StatelessWidget {
           ],
         ),
         _wordmark(),
-      ],
-    );
-  }
-
-  /// Route edge to edge, clipped, with the stats over a gradient foot.
-  ///
-  /// The one layout that survives an Instagram thumbnail, because the route is
-  /// the whole frame rather than a shape inside a margin. The scrim is the only
-  /// place this card departs from "no background": it is a gradient to fully
-  /// transparent, so it darkens just enough of whatever is behind the text to
-  /// keep it readable and disappears above the foot.
-  Widget _buildFullBleed() {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        _route(fillBox: true, padding: 0),
-        const DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.bottomCenter,
-              end: Alignment.topCenter,
-              colors: [Color(0xF71A1204), Color(0x00000000)],
-              stops: [0.0, 0.46],
-            ),
-          ),
-        ),
-        Positioned(
-          left: _pad,
-          right: _pad,
-          bottom: _pad,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _hero(_distance, _dLabel, size: 42, amber: false),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  _statLine('', _totalTime, inline: true),
-                  const SizedBox(width: 14),
-                  _statLine('', '$_avg avg', inline: true),
-                  const SizedBox(width: 14),
-                  _statLine('', '$_max peak', inline: true, amber: true),
-                ],
-              ),
-              _wordmark(),
-            ],
-          ),
-        ),
       ],
     );
   }
@@ -333,7 +314,7 @@ class ShareCard extends StatelessWidget {
             Text(_stamp, style: _captionStyle),
           ],
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
         Text(
           start?.isNotEmpty == true ? start! : 'Start',
           maxLines: 1,
@@ -362,7 +343,12 @@ class ShareCard extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
           style: _placeStyle,
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 12),
+        // The tightest band on the square canvas: everything above and below it
+        // is fixed, so the route gets whatever is left — about 145dp. Each dp
+        // trimmed from the header, the spacers and this inset went straight into
+        // it. If it ever reads as a hairline the next thing to give is the
+        // `_stamp` or the duration block, not this padding.
         Expanded(
           child: DecoratedBox(
             decoration: const BoxDecoration(
@@ -372,16 +358,16 @@ class ShareCard extends StatelessWidget {
               ),
             ),
             child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
+              padding: const EdgeInsets.symmetric(vertical: 9),
               child: _route(),
             ),
           ),
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 12),
         Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            _hero(_distance, _dLabel, size: 32),
+            _hero(_distance, _dLabel, size: 30),
             const Spacer(),
             _statBlock('AVG $_sLabel', _avg, alignEnd: true),
           ],
@@ -410,7 +396,11 @@ class ShareCard extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         Expanded(
+          // See `_route()` for why the size is explicit — without it this
+          // painter's width collapsed to zero and every x mapped to 0, which is
+          // the "one straight vertical line" of QA 7.12.
           child: CustomPaint(
+            size: Size.infinite,
             painter: _TracePainter(points, color: _amber),
           ),
         ),
@@ -440,6 +430,8 @@ class ShareCard extends StatelessWidget {
   String get _movingTime => formatDuration(ride.movingSeconds);
   String get _avg => unit.speed(ride.averageSpeedKmh).toStringAsFixed(0);
   String get _max => unit.speed(ride.maxSpeedKmh).toStringAsFixed(0);
+  String get _pace => formatPace(
+      ride.movingSeconds, unit.distanceMeters(ride.totalDistanceMeters));
   String get _dLabel => unit.distanceLabel;
   String get _sLabel => unit.speedLabel.toUpperCase();
 
@@ -451,8 +443,20 @@ class ShareCard extends StatelessWidget {
     return '${shortMonth(d.month).toUpperCase()} ${d.day} ${d.year} · $hh:$mm';
   }
 
+  /// Every caption on the card: the stat labels, the Trace and Speed-map headers,
+  /// the ends of the colour scale.
+  ///
+  /// Amber, not the [_muted] grey these used to be. The app's "one accent per
+  /// screen" rule does not reach here — that rule is about not making a rider
+  /// hunt for the one thing they can act on, and nothing on a share card is
+  /// actionable. What a card has instead is a brand, and the labels are the layer
+  /// that carries it: they are the same words on all six styles, so making them
+  /// the brand colour is what makes six layouts read as one app's cards. Size and
+  /// weight still do the hierarchy — 8sp w600 under a 30sp w700 hero is in no
+  /// danger of competing with it — and amber is brighter than the old grey, so
+  /// this reads *better* over an arbitrary photo behind the sticker, not worse.
   static const _labelStyle = TextStyle(
-    color: _muted,
+    color: _amber,
     fontSize: 8,
     fontWeight: FontWeight.w600,
     letterSpacing: 1.05,
@@ -474,19 +478,31 @@ class ShareCard extends StatelessWidget {
   );
 
   /// The route, filling whatever box it is given.
-  Widget _route({
-    bool colorBySpeed = false,
-    bool fillBox = false,
-    double padding = 10,
-  }) =>
-      CustomPaint(
+  ///
+  /// `size:` is not decoration. A `CustomPaint` with neither a child nor a size
+  /// resolves through `constraints.constrain(Size.zero)` — i.e.
+  /// `constraints.smallest` — and `Expanded` tightens only the *main* axis, so
+  /// the cross axis collapsed to nothing. The route was painting into a box one
+  /// axis of which was 0dp on every layout that has survived — the since-deleted
+  /// full-bleed card escaped only by accident, sitting in a
+  /// `Stack(fit: StackFit.expand)` that hands down tight constraints. That one
+  /// line is QA 7.9, 7.11 and 7.12 at once, plus the Ticket's invisible dashed
+  /// rules and Stacked rendering stats-only.
+  ///
+  /// `Size.infinite` rather than an enclosing `SizedBox.expand`: the three other
+  /// wrapped-`CustomPaint` sites in this app (`lean_gauge`, `speed_sparkline`,
+  /// `route_sparkline`) wrap in order to impose a *fixed* height on an unbounded
+  /// parent, which is the opposite problem. `constraints.constrain(Size.infinite)`
+  /// is exactly "take everything offered", said in a parameter the render object
+  /// already has. Safe here because every call site sits inside an `Expanded`
+  /// bounded by the card's own fixed canvas.
+  Widget _route({bool colorBySpeed = false}) => CustomPaint(
+        size: Size.infinite,
         painter: _RoutePainter(
           points,
           colorBySpeed: colorBySpeed,
           maxSpeedKmh: ride.maxSpeedKmh,
           stintStarts: stintStarts,
-          fillBox: fillBox,
-          pad: padding,
         ),
       );
 
@@ -605,27 +621,35 @@ class ShareCard extends StatelessWidget {
 
   /// The speed scale as a slim vertical bar, for the Speed map card. Replaces the
   /// boxed horizontal legend that used to overlap the route it explained.
+  ///
+  /// Fixed height and centred, not `Expanded`. A full-height gradient was fine
+  /// beside a 9:16 route — it read as a margin rule. On a square frame it becomes
+  /// a second strong vertical competing with the route for the same glance, so
+  /// the legend is deliberately shorter than the thing it explains. 4dp wide
+  /// rather than 3, because 3dp is 9 pixels in a 1080px export, which is where a
+  /// hairline stops being a bar and starts being an artefact.
   Widget _verticalSpeedScale() {
     return SizedBox(
+      // Enough for a three-digit max ("120" at 8sp measures ~14dp).
       width: 16,
       child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Text(_max, style: _labelStyle),
           const SizedBox(height: 4),
-          Expanded(
-            child: Container(
-              width: 3,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(2),
-                gradient: LinearGradient(
-                  // Bottom-to-top, so slow sits at the foot and fast at the head
-                  // — the same direction the numbers beside it run.
-                  begin: Alignment.bottomCenter,
-                  end: Alignment.topCenter,
-                  colors: SpeedPalette.gradient,
-                  stops: SpeedPalette.gradientStops,
-                ),
+          Container(
+            width: 4,
+            height: 132,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(2),
+              gradient: LinearGradient(
+                // Bottom-to-top, so slow sits at the foot and fast at the head
+                // — the same direction the numbers beside it run.
+                begin: Alignment.bottomCenter,
+                end: Alignment.topCenter,
+                colors: SpeedPalette.gradient,
+                stops: SpeedPalette.gradientStops,
               ),
             ),
           ),
@@ -640,12 +664,21 @@ class ShareCard extends StatelessWidget {
   ///
   /// It used to be a 46dp logo and a 14sp name in the middle of a centred column,
   /// which is why it read as floating: it was as loud as the stats and had no edge
-  /// to belong to. Small, grey, and pinned to the bottom-left, it signs the card
-  /// instead of competing with it.
+  /// to belong to. Small and grey, it signs the card instead of competing with it.
+  ///
+  /// Centred, not bottom-left. Five of the six layouts put their stats directly
+  /// above this, so 14 → 10 was all the "pull up" they needed; **Split** was the
+  /// one that still read as floating, and its problem was horizontal — stats
+  /// bottom-right, mark bottom-left under the route, signing nothing. One
+  /// `mainAxisAlignment` fixes it everywhere at once: `RenderFlex` at the default
+  /// `MainAxisSize.max` sizes to `constraints.maxWidth`, which is always bounded
+  /// here, so this Row is full-width whatever its parent Column's
+  /// `crossAxisAlignment` says. No per-layout edits.
   Widget _wordmark() {
     return Padding(
-      padding: const EdgeInsets.only(top: 14),
+      padding: const EdgeInsets.only(top: 10),
       child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
           const Image(
             image: brandLogo,
@@ -657,7 +690,10 @@ class ShareCard extends StatelessWidget {
           Text(
             'THROTTLEPATH',
             style: TextStyle(
-              color: _muted,
+              // Amber with the rest of the captions — and the mark beside it was
+              // already amber, so the signature had been half one colour and half
+              // another the whole time.
+              color: _amber,
               fontSize: 9,
               fontWeight: FontWeight.w700,
               letterSpacing: 2,
@@ -680,8 +716,6 @@ class _RoutePainter extends CustomPainter {
     this.colorBySpeed = false,
     this.maxSpeedKmh = 0,
     this.stintStarts = const [],
-    this.fillBox = false,
-    this.pad = 10,
   });
 
   final List<TrackPoint> points;
@@ -691,29 +725,16 @@ class _RoutePainter extends CustomPainter {
   /// Indices where each stint (after the first) begins; empty for a single ride.
   final List<int> stintStarts;
 
-  /// Scale to *cover* the box and clip the overflow, instead of fitting inside it
-  /// — SVG's `slice` rather than `meet`. Only the full-bleed card wants this: its
-  /// whole premise is a route that reaches the edges, and a route's aspect ratio
-  /// is whatever the roads were.
-  final bool fillBox;
-
   /// Inset around the fitted route.
-  final double pad;
+  ///
+  /// Was a parameter so the full-bleed card could pass 0 and scale to *cover* the
+  /// frame instead of fitting inside it. That card is gone, and with it the only
+  /// reason a route ever showed a crop of the ride rather than the ride.
+  static const double _pad = 10;
 
   static const _amber = Color(0xFFFFB22C);
   static const _red = Color(0xFFEF4444);
   static const _dim = Color(0xFFD8D8D8);
-
-  /// Per-stint route hues, cycled by stint index. Stint 1 is the brand amber so a
-  /// single-stint trip (and every plain ride) keeps the original look.
-  static const _stintPalette = <Color>[
-    Color(0xFFFFB22C), // amber (brand)
-    Color(0xFF29B6F6), // light blue
-    Color(0xFF66BB6A), // green
-    Color(0xFFAB47BC), // purple
-    Color(0xFFFF7043), // deep orange
-    Color(0xFFEC407A), // pink
-  ];
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -744,27 +765,21 @@ class _RoutePainter extends CustomPainter {
 
     final spanX = (maxX - minX);
     final spanY = (maxY - minY);
-    final availW = size.width - pad * 2;
-    final availH = size.height - pad * 2;
-    // Uniform scale either way, so the route's true shape survives; `min` fits it
-    // inside the box, `max` covers the box and lets the edges clip. Zero spans
-    // (a stationary recording) fall through to 1.0 rather than dividing by zero.
+    final availW = size.width - _pad * 2;
+    final availH = size.height - _pad * 2;
+    // One uniform scale, fitted to the tighter axis, so the route's true shape
+    // survives and all of it is in frame. Zero spans (a stationary recording)
+    // fall through to 1.0 rather than dividing by zero.
     final sx = spanX > 0 ? availW / spanX : double.infinity;
     final sy = spanY > 0 ? availH / spanY : double.infinity;
-    final scale = fillBox
-        ? (sx.isFinite && sy.isFinite
-            ? math.max(sx, sy)
-            : (sx.isFinite ? sx : sy))
-        : math.min(sx, sy);
+    final scale = math.min(sx, sy);
     final safeScale = scale.isFinite ? scale : 1.0;
-
-    if (fillBox) canvas.clipRect(Offset.zero & size);
 
     // Centre the scaled path in the box.
     final drawnW = spanX * safeScale;
     final drawnH = spanY * safeScale;
-    final offsetX = pad + (availW - drawnW) / 2;
-    final offsetY = pad + (availH - drawnH) / 2;
+    final offsetX = _pad + (availW - drawnW) / 2;
+    final offsetY = _pad + (availH - drawnH) / 2;
 
     Offset map(Offset o) => Offset(
           offsetX + (o.dx - minX) * safeScale,
@@ -809,11 +824,18 @@ class _RoutePainter extends CustomPainter {
     return out.isEmpty ? [(0, n)] : out;
   }
 
+  /// Every stint in the one brand amber.
+  ///
+  /// A multi-stint trip used to cycle a six-hue palette here, which reads inside
+  /// the app — the Trip screen has a legend to say which colour is which stint.
+  /// A share card has no legend and is looked at for a second by someone who was
+  /// not on the ride, so five extra hues only say "this is several things" where
+  /// the card's whole claim is that it is one ride. The stints stay *segmented*
+  /// (that is what keeps a straight line from being drawn across each join); only
+  /// the colour is shared, and the grey turnaround dot still marks every join.
   void _paintStints(Canvas canvas, List<Offset> pts, List<(int, int)> ranges) {
-    for (var r = 0; r < ranges.length; r++) {
-      final (start, end) = ranges[r];
+    for (final (start, end) in ranges) {
       if (end - start < 2) continue;
-      final color = _stintPalette[r % _stintPalette.length];
       final path = Path()..moveTo(pts[start].dx, pts[start].dy);
       for (var i = start + 1; i < end; i++) {
         path.lineTo(pts[i].dx, pts[i].dy);
@@ -822,7 +844,7 @@ class _RoutePainter extends CustomPainter {
       canvas.drawPath(
         path,
         Paint()
-          ..color = color.withValues(alpha: 0.25)
+          ..color = _amber.withValues(alpha: 0.25)
           ..style = PaintingStyle.stroke
           ..strokeWidth = 8
           ..strokeCap = StrokeCap.round
@@ -832,7 +854,7 @@ class _RoutePainter extends CustomPainter {
       canvas.drawPath(
         path,
         Paint()
-          ..color = color
+          ..color = _amber
           ..style = PaintingStyle.stroke
           ..strokeWidth = 3.5
           ..strokeCap = StrokeCap.round
@@ -874,20 +896,27 @@ class _RoutePainter extends CustomPainter {
       oldDelegate.points != points ||
       oldDelegate.colorBySpeed != colorBySpeed ||
       oldDelegate.maxSpeedKmh != maxSpeedKmh ||
-      oldDelegate.fillBox != fillBox ||
-      oldDelegate.pad != pad ||
       !listEquals(oldDelegate.stintStarts, stintStarts);
 }
 
-// `_fmtPace` went with the PACE stat (spec 9.4). Pace is a running metric —
-// minutes per kilometre says nothing useful about a motorcycle — and it was the
-// sixth number on a card that now leads with one.
+// `_fmtPace` used to live here as a private top-level, and came back as
+// `formatPace` in `core/duration_format.dart` instead. Not for reuse — the Split
+// card is still its only caller — but because it is arithmetic with three edge
+// cases (the sub-50m sentinel, the `isFinite` guard, the `ss == 60` carry) that
+// were otherwise testable only by rendering a widget and matching a string.
 
 /// Speed against distance travelled, as a filled curve. The Trace card's whole
 /// content.
 ///
-/// Distance comes from the same equirectangular projection the route uses, so the
-/// x axis agrees with the shape the other cards draw from these same points.
+/// The x axis is the project's read-path distance ([cumulativeMeters]), which
+/// freezes across a GPS blackout. This used to roll its own equirectangular
+/// accumulator over the flattened point list, justified as keeping the axis in
+/// agreement with the shape the other cards draw — and that justification was
+/// the bug. A blackout the write path refused to count still contributed one
+/// enormous phantom segment here, crushing the whole real ride into a thin band
+/// at the left. The agreement that matters is with the odometer and the
+/// ride-detail speed chart: the distance the rider was *told* they rode, not the
+/// span of the polyline's bounding box.
 class _TracePainter extends CustomPainter {
   _TracePainter(this.points, {required this.color});
 
@@ -898,21 +927,8 @@ class _TracePainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     if (points.length < 2) return;
 
-    final midLat =
-        points.map((p) => p.latitude).reduce((a, b) => a + b) / points.length;
-    final kx = math.cos(midLat * math.pi / 180.0);
-    // Metres per degree of latitude, near enough for a normalised axis.
-    const mPerDeg = 111320.0;
-
-    final xs = <double>[0];
-    var run = 0.0;
-    for (var i = 1; i < points.length; i++) {
-      final dLat = (points[i].latitude - points[i - 1].latitude) * mPerDeg;
-      final dLon =
-          (points[i].longitude - points[i - 1].longitude) * mPerDeg * kx;
-      run += math.sqrt(dLat * dLat + dLon * dLon);
-      xs.add(run);
-    }
+    final xs = cumulativeMeters(points, fixOf: trackPointFix);
+    final run = xs.last;
 
     var peak = 0.0;
     for (final p in points) {

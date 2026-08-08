@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../core/units.dart';
@@ -175,9 +177,20 @@ class _ShareComposerState extends State<_ShareComposer> {
   Widget build(BuildContext context) {
     final cx = AppColors.of(context);
     final media = MediaQuery.of(context);
+    // A square card wants a square preview: as wide as the sheet's content area
+    // (20dp of padding either side) is also as tall as it can usefully be. The
+    // second term is the rest of the sheet — handle, title, chips, blurb,
+    // destinations, GPX row — so on a short screen the preview is what gives way.
+    // Never past 1:1; scaling a 360dp card up only softens it.
+    final double preview = math
+        .min(media.size.width - 40, media.size.height * 0.9 - 300)
+        .clamp(140, 360)
+        .toDouble();
     return ConstrainedBox(
-      // Nearly full height: the preview is the point of the sheet, and every dp
-      // handed back to the screen behind it is a dp the card doesn't get.
+      // A ceiling now, not a target. While the card was 9:16 the sheet took every
+      // dp it could get, because a tall preview *was* the point of it; a square
+      // preview stops wanting more once it is as wide as the sheet, so the column
+      // sizes to its contents and this only catches the case where they don't fit.
       constraints: BoxConstraints(maxHeight: media.size.height * 0.9),
       child: SafeArea(
         top: false,
@@ -217,7 +230,8 @@ class _ShareComposerState extends State<_ShareComposer> {
               ),
             ),
             const SizedBox(height: 12),
-            Expanded(
+            SizedBox(
+              height: preview,
               child: PageView.builder(
                 controller: _pages,
                 itemCount: ShareLayout.values.length,
@@ -314,8 +328,11 @@ class _ShareComposerState extends State<_ShareComposer> {
   }
 }
 
-/// One full-size card preview on a dark backdrop, scaled to whatever room the
-/// sheet has left.
+/// One card preview on a dark backdrop, scaled by [FittedBox] into whatever room
+/// the sheet gave the page.
+///
+/// No `SizedBox` around the card: it sizes itself to [ShareCard.canvasSize], so
+/// there is nothing here that can disagree with what gets exported.
 class _Preview extends StatelessWidget {
   const _Preview({
     required this.ride,
@@ -346,16 +363,12 @@ class _Preview extends StatelessWidget {
           clipBehavior: Clip.antiAlias,
           child: FittedBox(
             fit: BoxFit.contain,
-            child: SizedBox(
-              width: 360,
-              height: 640,
-              child: ShareCard(
-                ride: ride,
-                points: points,
-                unit: unit,
-                layout: layout,
-                stintStarts: stintStarts,
-              ),
+            child: ShareCard(
+              ride: ride,
+              points: points,
+              unit: unit,
+              layout: layout,
+              stintStarts: stintStarts,
             ),
           ),
         ),

@@ -23,6 +23,7 @@ class HomeShell extends ConsumerStatefulWidget {
 }
 
 class _HomeShellState extends ConsumerState<HomeShell> {
+  static const int _recordTab = 0;
   static const int _historyTab = 1;
 
   static const _tabs = <_TabSpec>[
@@ -52,6 +53,13 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       // derive route keys/shapes for any ride still missing them.
       ref.invalidate(geocodeBackfillProvider);
       ref.invalidate(routeBackfillProvider);
+    }
+    if (i == _recordTab) {
+      // The "continue a nearby trip?" nudge, for the same stale-cache reason —
+      // Record never unmounts either, so its `autoDispose` provider would answer
+      // once per app launch. Deliberately *not* invalidated on History entry:
+      // this one takes a GPS fix to compute, and History never reads it.
+      ref.invalidate(nearbyOpenTripProvider);
     }
     ref.read(homeTabProvider.notifier).state = i;
   }

@@ -230,18 +230,66 @@ class TelemetrySheet extends StatelessWidget {
     ];
   }
 
-  Widget _gauge(_SheetPhase p) => LiveSpeedAnnouncer(
-        speed: unit.speed(p.speedKmh),
-        unitLabel: unit.speedLabel,
-        active: p.recording && !p.frozen,
-        child: AnalogSpeedGauge(
-          speed: unit.speed(p.speedKmh),
-          maxSpeed: unit.speed(_t?.maxSpeedKmh ?? 0),
-          topOfScale: AnalogSpeedGauge.topFor(unit),
-          unitLabel: unit.speedLabel,
-          dimmed: !p.recording || p.frozen,
-        ),
-      );
+  /// Width the dial is given once it has to share its row with the trend.
+  ///
+  /// Not a lowering of `AnalogSpeedGauge`'s own 280 cap: that cap is right for
+  /// the *standalone* dial, which is the whole hero on the idle and just-finished
+  /// screens. The gauge already sizes to `constraints.maxWidth`, so the caller —
+  /// the only party that knows what else is on the row — owns the budget.
+  ///
+  /// 150 splits the sheet's 313dp of content as 150 / 14 / 149, leaving the
+  /// sparkline 9dp above the narrowest width it is tested at. It also makes the
+  /// dial 109dp tall instead of 174, so this *frees* 65dp of sheet.
+  static const double _dialWithTrend = 150;
+
+  /// The dial, sharing its row with the same speed trend the numeral already gets
+  /// (D-7): the dial says what the bike is doing now, the line says what the road
+  /// has been doing, and neither question is answerable from the other.
+  Widget _gauge(_SheetPhase p) {
+    final dial = AnalogSpeedGauge(
+      speed: unit.speed(p.speedKmh),
+      maxSpeed: unit.speed(_t?.maxSpeedKmh ?? 0),
+      topOfScale: AnalogSpeedGauge.topFor(unit),
+      unitLabel: unit.speedLabel,
+      dimmed: !p.recording || p.frozen,
+    );
+
+    // Gated on `recording` alone — deliberately *not* the numeral branch's
+    // `recording && canDraw`. The numeral can afford `canDraw` for free because
+    // its 74sp digits are taller than the sparkline either way, so nothing moves
+    // when the trend appears. Here the dial's own height is what changes, and
+    // waiting for `canDraw` would shrink the sheet 65dp about two seconds into
+    // every ride — a jolt exactly where a rider glances down. Tying it to
+    // `recording` puts that reflow on the acquiring→recording frame, which
+    // already reflows. `SpeedSparkline` self-hides to a bare 46dp box until it
+    // has a window worth drawing, which is invisible inside a 109dp row.
+    final withTrend = p.recording;
+
+    // The announcer stays outside the Row, as in the numeral branch: it
+    // `ExcludeSemantics`-wraps its child, so the sparkline's own captions are
+    // silent either way, and the row still announces one current speed.
+    return LiveSpeedAnnouncer(
+      speed: unit.speed(p.speedKmh),
+      unitLabel: unit.speedLabel,
+      active: p.recording && !p.frozen,
+      child: withTrend
+          ? Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                SizedBox(width: _dialWithTrend, child: dial),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: SpeedSparkline(
+                    samples: state.speedSamples,
+                    unit: unit,
+                    dimmed: p.frozen,
+                  ),
+                ),
+              ],
+            )
+          : dial,
+    );
+  }
 
   /// The big number. While counting down it is itself the skip target — the whole
   /// point of F10 is that the rider gets past this without hunting for a control.
@@ -718,6 +766,12 @@ class _IdleContext extends ConsumerWidget {
 /// An accuracy figure only appears once something else (the map opening, or the
 /// locate button) has produced a real fix; we never claim a precision we haven't
 /// measured.
+///
+/// The state it reports can change while the app is in the background — which is
+/// exactly where it changes, since fixing either condition means leaving for
+/// Quick Settings or the Settings app. This is the app's only
+/// [WidgetsBindingObserver]; see [_GpsReadinessRowState] for why a lifecycle
+/// hook and not a location-service stream.
 class _GpsReadinessRow extends StatefulWidget {
   const _GpsReadinessRow({required this.accuracyMeters});
 
@@ -729,13 +783,38 @@ class _GpsReadinessRow extends StatefulWidget {
 
 enum _GpsReadiness { checking, servicesOff, permissionNeeded, ready }
 
-class _GpsReadinessRowState extends State<_GpsReadinessRow> {
+class _GpsReadinessRowState extends State<_GpsReadinessRow>
+    with WidgetsBindingObserver {
   _GpsReadiness _state = _GpsReadiness.checking;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _probe();
+  }
+
+  @override
+  void dispose() {
+    // Not optional bookkeeping: this row is rebuilt from scratch after every
+    // saved ride (`_IdleContext` only exists while there is no telemetry), so a
+    // missed removal leaks one dead observer per ride for the app's lifetime.
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// Re-checks on return to the app, which is what makes the row *current*
+  /// rather than a reading taken once at launch: a rider who sees "Location is
+  /// off", fixes it, and comes back used to find the same sentence waiting.
+  ///
+  /// A lifecycle hook and not `getServiceStatusStream()` — that stream reports
+  /// the services master toggle only, so it would fix at most half of what this
+  /// row reports and leave the permission states just as stale. Every route to
+  /// granting a permission or flipping the toggle exits and re-enters the app,
+  /// so resume covers both with one signal.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _probe();
   }
 
   Future<void> _probe() async {
@@ -754,7 +833,11 @@ class _GpsReadinessRowState extends State<_GpsReadinessRow> {
       // A platform that won't answer is not a platform we can promise a fix on.
       next = _GpsReadiness.permissionNeeded;
     }
-    if (mounted) setState(() => _state = next);
+    // Resume fires on every return to the app, and the answer is usually the
+    // one we already have — rebuilding for it would repaint the sheet each time
+    // the rider glances at a notification.
+    if (!mounted || next == _state) return;
+    setState(() => _state = next);
   }
 
   @override

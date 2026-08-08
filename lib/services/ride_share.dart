@@ -30,9 +30,15 @@ class RideShare {
 
   static const _channel = ShareChannel.channel;
 
-  /// The 9:16 sticker canvas the card is centred within, and its output density.
-  static const _canvas = Size(360, 640);
-  static const _pixelRatio = 3.0; // → 1080 × 1920 PNG
+  /// The sticker canvas and its output density.
+  ///
+  /// Read from the card rather than restated: the PNG the rider gets has to be
+  /// the card they previewed, and a second copy of the size here is exactly how
+  /// it could stop being. Instagram receives this as `interactive_asset_uri` — a
+  /// scalable sticker overlay, not a background — so a square export is placed
+  /// and sized by hand on the Story rather than letterboxed into it.
+  static const _canvas = ShareCard.canvasSize;
+  static const _pixelRatio = 3.0; // → 1080 × 1080 PNG
 
   /// Instagram Story background gradient painted behind the transparent sticker.
   static const _topBackgroundColor = '#241A05';

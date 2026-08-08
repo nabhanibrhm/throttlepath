@@ -21,6 +21,11 @@ import '../theme/app_theme.dart';
 /// measures ~1.05:1 against both dark grounds, the same failure that got
 /// `#262626` rejected from this palette once already (see `app_theme.dart`).
 /// `border` is the darkest hairline this project has been willing to ship.
+///
+/// Both of those rejections were argued on WCAG ratio, which is fair on a dark
+/// ground and misleading on a light one — the formula compresses near white, so
+/// the light hairline passed its ratio check while reading half the weight of
+/// the dark one. The light value is set by ΔL\* instead; see `app_theme.dart`.
 class HairlineRow extends StatelessWidget {
   const HairlineRow({
     super.key,

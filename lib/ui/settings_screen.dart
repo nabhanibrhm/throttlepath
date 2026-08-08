@@ -125,7 +125,7 @@ class SettingsScreen extends ConsumerWidget {
           const SectionLabel(label: 'About', rule: false),
           _SettingsTile(
             title: 'ThrottlePath',
-            subtitle: 'Version 1.0.0 · rides are stored on this phone only.',
+            subtitle: _aboutLine(ref.watch(appVersionProvider).valueOrNull),
             onTap: () {},
           ),
         ],
@@ -133,6 +133,15 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 }
+
+/// The About row's single line, with the version dropped entirely when it isn't
+/// known yet (or on a platform that won't answer) rather than shown as a
+/// placeholder. The row is only ever read for one reason — to quote the version
+/// somewhere — so a wrong number there is worse than no number, and the gap
+/// lasts one frame on the way to a tab the rider had to navigate to.
+String _aboutLine(String? version) => version == null
+    ? 'Rides are stored on this phone only.'
+    : 'Version $version · rides are stored on this phone only.';
 
 // `_ThemeTile` and `_ThemeSegment` are gone (spec 8.4). Theme is a value row like
 // every other setting now, opening `showThemePickerSheet` — see
