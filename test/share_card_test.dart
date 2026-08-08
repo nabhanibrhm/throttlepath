@@ -350,6 +350,91 @@ void main() {
     });
   });
 
+  group('the route never draws across a dead zone', () {
+    /// Just the route painter — the Speed card also carries a scale beside the
+    /// map, and a finder that swept up every painter would average it in.
+    Finder routePainter() => find.byWidgetPredicate((w) =>
+        w is CustomPaint && w.painter.runtimeType.toString() == '_RoutePainter');
+
+    /// The vertical extent of the single tallest thing the painter drew, as a
+    /// fraction of the box — strokes and straight segments alike.
+    ///
+    /// Bridging shows up here and almost nowhere else: both legs get drawn either
+    /// way, so the *bounds of everything* are identical whether or not the dead
+    /// zone was joined. What changes is whether any one primitive spans it.
+    double tallestPrimitive(Finder finder, Size box) {
+      var tallest = 0.0;
+      for (final (method, args) in paintCalls(finder)) {
+        switch (method) {
+          case #drawPath:
+            tallest = math.max(tallest, (args[0] as Path).getBounds().height);
+          case #drawLine:
+            tallest = math.max(
+                tallest, ((args[0] as Offset).dy - (args[1] as Offset).dy).abs());
+        }
+      }
+      return tallest / box.height;
+    }
+
+    // Both flavours of the same painter: four cards stroke a flat amber path per
+    // run, the Speed card draws every fix-to-fix segment individually. A bridge
+    // would be one enormous path in the first and one enormous line in the second.
+    for (final layout in const [
+      ShareLayout.split,
+      ShareLayout.stacked,
+      ShareLayout.statsTop,
+      ShareLayout.speed,
+      ShareLayout.ticket,
+    ]) {
+      testWidgets('${layout.title} leaves the blackout unjoined', (t) async {
+        final points = blackoutTrack();
+        await t.pumpWidget(host(layout, makeRide(), points));
+        await t.pumpAndSettle();
+
+        final box = t.getSize(routePainter().first);
+
+        // Guard the fixture before trusting what it proves. Both legs have to be
+        // on the card and far apart, or "nothing spans the gap" would pass simply
+        // because there was no gap to span.
+        final drawn = paintedBounds(routePainter())!;
+        expect(drawn.height / box.height, greaterThan(0.7),
+            reason: 'the two legs are not far apart on this card, so the '
+                'assertion below cannot mean what it says');
+
+        expect(tallestPrimitive(routePainter(), box), lessThan(0.25),
+            reason: 'something is drawn straight across the dead zone — the '
+                '40 km the write path spent three guards refusing to count');
+      });
+    }
+
+    testWidgets('a blackout is a break, not a turnaround', (t) async {
+      // The grey dot says "the rider stopped here and set off again". A dead zone
+      // is the opposite claim, so it breaks the line and stays unmarked.
+      //
+      // Compared as a packed int, not against a `Color` literal: a `Paint`'s colour
+      // round-trips through float components, so `paint.color == Color(0xFFD8D8D8)`
+      // is false for a paint that is unmistakably 0xFFD8D8D8.
+      int greyDots(Finder f) => paintCalls(f)
+          .where((c) =>
+              c.$1 == #drawCircle &&
+              (c.$2[2] as Paint).color.toARGB32() == 0xFFD8D8D8 &&
+              (c.$2[2] as Paint).style == PaintingStyle.fill)
+          .length;
+
+      await t.pumpWidget(host(ShareLayout.stacked, makeRide(), blackoutTrack()));
+      await t.pumpAndSettle();
+      expect(greyDots(routePainter()), 0,
+          reason: 'a lost signal was marked as a place the ride visited');
+
+      // The same track handed in as two stints *is* a turnaround, and still says so.
+      await t.pumpWidget(host(ShareLayout.stacked, makeRide(), blackoutTrack(),
+          stintStarts: const [30]));
+      await t.pumpAndSettle();
+      expect(greyDots(routePainter()), 1,
+          reason: 'a real stint join lost its turnaround dot');
+    });
+  });
+
   testWidgets('the trace spreads a blacked-out ride across the whole card',
       (t) async {
     // `_TracePainter` used to roll its own equirectangular accumulator over the

@@ -61,7 +61,10 @@ class GpxExport {
 
     // Segment boundaries, deduplicated and in order: a stint start of 0 is implied
     // by the first segment, and an out-of-range one would produce an empty seg.
-    final breaks = [...stintStarts, ..._blackoutStarts(points)]
+    final breaks = [
+      ...stintStarts,
+      ...runStartIndices(points, fixOf: trackPointFix),
+    ]
         .where((i) => i > 0 && i < points.length)
         .toSet()
         .toList()
@@ -98,18 +101,6 @@ class GpxExport {
       ..writeln('</gpx>');
     return b.toString();
   }
-
-  /// Indices in [points] at which recording resumed after a GPS blackout.
-  static List<int> _blackoutStarts(List<TrackPoint> points) => [
-        for (var i = 1; i < points.length; i++)
-          if (points[i]
-                  .timestamp
-                  .difference(points[i - 1].timestamp)
-                  .inSeconds
-                  .abs() >=
-              kSignalLossSeconds)
-            i,
-      ];
 
   /// A filesystem-safe basename like `throttlepath-morning-commute-20260728.gpx`.
   static String fileNameFor(Ride ride) {

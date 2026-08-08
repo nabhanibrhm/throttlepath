@@ -723,6 +723,9 @@ class _RoutePainter extends CustomPainter {
   final double maxSpeedKmh;
 
   /// Indices where each stint (after the first) begins; empty for a single ride.
+  ///
+  /// Breaks the polyline *and* earns a turnaround dot. Blackout breaks are found
+  /// from the timestamps instead (see [_ranges]) and get no dot.
   final List<int> stintStarts;
 
   /// Inset around the fitted route.
@@ -788,9 +791,10 @@ class _RoutePainter extends CustomPainter {
 
     final mapped = [for (final o in proj) map(o)];
 
-    // One contiguous range per stint (single ride → one range). Segments never
-    // bridge a stint boundary, so joins draw no false straight connector.
-    final ranges = _stintRanges(points.length);
+    // One contiguous range per stretch of continuous recording. Segments never
+    // bridge a stint boundary or a GPS blackout, so neither draws a false
+    // straight connector.
+    final ranges = _ranges(points.length);
 
     if (colorBySpeed) {
       _paintSpeedColored(canvas, mapped, ranges);
@@ -798,9 +802,14 @@ class _RoutePainter extends CustomPainter {
       _paintStints(canvas, mapped, ranges);
     }
 
-    // Turnaround dots at each join (end of every non-final stint), then the start
-    // (amber) and end (red) dots painted on top.
+    // Turnaround dots at each *stint* join, then the start (amber) and end (red)
+    // dots on top. Deliberately not drawn at a blackout break: the dot means "the
+    // rider stopped here and set off again", and a dead zone is the opposite
+    // claim — nobody stopped, the receiver did. Marking both the same way would
+    // turn a lost signal into a place the ride visits.
+    final joins = stintStarts.toSet();
     for (var r = 0; r < ranges.length - 1; r++) {
+      if (!joins.contains(ranges[r].$2)) continue;
       final end = ranges[r].$2 - 1;
       if (end >= 0 && end < mapped.length) _dot(canvas, mapped[end], _dim);
     }
@@ -808,15 +817,25 @@ class _RoutePainter extends CustomPainter {
     _dot(canvas, mapped.last, _red);
   }
 
-  /// Contiguous `[start, end)` index ranges, one per stint, from [stintStarts]. With
-  /// no boundaries the whole track is a single range.
-  List<(int, int)> _stintRanges(int n) {
-    final bounds = <int>[
+  /// Contiguous `[start, end)` index ranges, one per unbroken stretch of
+  /// recording. With no boundaries the whole track is a single range.
+  ///
+  /// Two things break a range, and only one of them can be handed in. Stint joins
+  /// come from [stintStarts], because only the caller knows where one stint ended
+  /// and the next began. Blackouts are read off the timestamps here rather than
+  /// asked for, the way the GPX writer does it — a card built straight from a
+  /// ride's points would otherwise have to be told, and the one that wasn't drew
+  /// a 33 km diagonal across a dead zone as if it were road.
+  List<(int, int)> _ranges(int n) {
+    final bounds = <int>{
       0,
       for (final b in stintStarts)
         if (b > 0 && b < n) b,
+      for (final b in runStartIndices(points, fixOf: trackPointFix))
+        if (b > 0 && b < n) b,
       n,
-    ]..sort();
+    }.toList()
+      ..sort();
     final out = <(int, int)>[];
     for (var i = 0; i < bounds.length - 1; i++) {
       if (bounds[i + 1] > bounds[i]) out.add((bounds[i], bounds[i + 1]));

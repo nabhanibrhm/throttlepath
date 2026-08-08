@@ -53,6 +53,64 @@ void main() {
     });
   });
 
+  group('runStartIndices', () {
+    test('agrees with splitIntoRuns about where the breaks are', () {
+      final track = [
+        ...leg(0, 120, homeLat, homeLon),
+        ...leg(600, 120, homeLat, homeLon),
+        ...leg(900, 120, homeLat, homeLon),
+      ];
+      expect(runStartIndices(track, fixOf: fixOf), [120, 240]);
+      expect(splitIntoRuns(track, fixOf: fixOf).map((r) => r.length), [
+        120,
+        120,
+        120,
+      ]);
+    });
+
+    test('reproduces breakIndices on an already-segmented track', () {
+      // The invariant the share card leans on. It is handed the *flattened* kept
+      // fixes and no break list, and re-derives the joins from timestamps alone.
+      // That is only safe if removing an excursion leaves a gap at the seam —
+      // which it does, because the excursion was bracketed by two gaps of its own.
+      final track = [
+        ...leg(0, 300, homeLat, homeLon),
+        ...leg(1500, 49, driftLat, driftLon),
+        ...leg(1600, 60, homeLat, homeLon),
+      ];
+
+      final seg = segmentTrack(track, fixOf: fixOf);
+
+      expect(seg.discardedCount, 49, reason: 'the fixture stopped dropping');
+      expect(runStartIndices(seg.points, fixOf: fixOf), seg.breakIndices);
+    });
+
+    test('cuts at the threshold but not below it', () {
+      expect(
+        runStartIndices([
+          ...leg(0, 5, homeLat, homeLon),
+          ...leg(4 + kSignalLossSeconds - 1, 5, homeLat, homeLon),
+        ], fixOf: fixOf),
+        isEmpty,
+      );
+      expect(
+        runStartIndices([
+          ...leg(0, 5, homeLat, homeLon),
+          ...leg(4 + kSignalLossSeconds, 5, homeLat, homeLon),
+        ], fixOf: fixOf),
+        [5],
+      );
+    });
+
+    test('is empty for a healthy, an empty and a single-fix track', () {
+      expect(runStartIndices(leg(0, 60, homeLat, homeLon), fixOf: fixOf),
+          isEmpty);
+      expect(runStartIndices(<Fix>[], fixOf: fixOf), isEmpty);
+      expect(runStartIndices(leg(0, 1, homeLat, homeLon), fixOf: fixOf),
+          isEmpty);
+    });
+  });
+
   group('segmentTrack', () {
     test('drops a bracketed excursion and keeps the ride', () {
       // The shape of stint 2: ride, 20-minute blackout, a coherent excursion

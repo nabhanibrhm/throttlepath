@@ -122,6 +122,34 @@ List<List<T>> splitIntoRuns<T>(
   return runs;
 }
 
+/// Indices into [points] at which recording resumed after a gap — i.e. where
+/// each run after the first begins.
+///
+/// The flat-list form of [splitIntoRuns], for the consumers that keep the track
+/// as one list and only need to know where not to join it: the GPX writer's
+/// `<trkseg>` boundaries, and the share card's polyline. Both had grown their
+/// own timestamp loop, which is how one of them came to be right and the other
+/// to draw a straight line across a dead zone.
+///
+/// Note this reads *timestamps only*, so it stays correct on an already
+/// segmented track: dropping a displaced excursion leaves a gap at the seam,
+/// and that seam is exactly a place the line must not be joined either.
+List<int> runStartIndices<T>(
+  List<T> points, {
+  required TrackFix Function(T) fixOf,
+  int gapSeconds = kSignalLossSeconds,
+}) =>
+    [
+      for (var i = 1; i < points.length; i++)
+        if (fixOf(points[i])
+                .time
+                .difference(fixOf(points[i - 1]).time)
+                .inSeconds
+                .abs() >=
+            gapSeconds)
+          i,
+    ];
+
 /// Splits [points] into runs and discards displaced excursions.
 ///
 /// An excursion is only dropped when all three hold, and the conjunction is the
