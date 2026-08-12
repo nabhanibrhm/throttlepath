@@ -3,6 +3,7 @@ package id.co.opentrack.throttlepath
 import android.content.ActivityNotFoundException
 import android.content.ContentValues
 import android.content.Intent
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
@@ -18,6 +19,13 @@ class MainActivity : FlutterActivity() {
     private val channelName = "id.co.opentrack.throttlepath/share"
     private val instagramPackage = "com.instagram.android"
 
+    /**
+     * Picture-in-Picture bridge. Held as a field because it has to be reachable
+     * from the activity lifecycle callbacks below, unlike the fire-and-forget
+     * channels set up alongside it.
+     */
+    private var pip: PipController? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
@@ -25,6 +33,8 @@ class MainActivity : FlutterActivity() {
         // EventChannel stream handler; it holds no GNSS resources until Dart
         // subscribes.
         GnssStatusStreamer(applicationContext, flutterEngine.dartExecutor.binaryMessenger)
+
+        pip = PipController(this, flutterEngine.dartExecutor.binaryMessenger)
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler { call, result ->
@@ -37,6 +47,31 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    /**
+     * Home or Recents pressed. The only entry point for PiP on this API level —
+     * `setAutoEnterEnabled` is API 31+ and the test device is API 28.
+     */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        pip?.onUserLeaveHint()
+    }
+
+    /**
+     * Relayed to Dart so it can swap the widget tree between the full app and the
+     * compact PiP card.
+     *
+     * The manifest's `configChanges` list already absorbs the screen-size/density
+     * changes a PiP resize causes, so the activity is *not* recreated around this
+     * callback and the in-progress ride's UI state survives it.
+     */
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration,
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        pip?.onPipModeChanged(isInPictureInPictureMode)
     }
 
     private fun handleShare(

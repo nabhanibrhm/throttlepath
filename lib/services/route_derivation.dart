@@ -2,6 +2,7 @@ import '../core/lean.dart';
 import '../core/route_blob.dart';
 import '../core/route_key.dart';
 import '../core/smoothness.dart';
+import '../core/track_runs.dart';
 import '../data/database_service.dart';
 import '../data/models/ride.dart';
 import '../data/models/track_point.dart';
@@ -28,7 +29,10 @@ const double kRouteMinDistanceMeters = 200;
 ///
 /// 2 — derives from the *segmented* track (blackouts cut, displaced excursions
 /// dropped) rather than the raw fix list. Version 1 blobs drew the phantom.
-const int kDerivedVersion = 2;
+/// 3 — keys off the main cluster's endpoints instead of the track's first/last
+/// fix, so a head or tail phantom (which segmentation deliberately cannot drop)
+/// no longer decides where the ride started and ended.
+const int kDerivedVersion = 3;
 
 /// Smoothness scored from [points]' speed trace, or null when the track is too
 /// sparse to say anything (see `kMinSmoothnessSamples`).
@@ -78,7 +82,8 @@ double? deriveSmoothness(List<TrackPoint> points) =>
   // add noise: RDP *preferentially keeps* it (it is the maximum-deviation
   // vertex), and since `normalizeRoute` scales each axis independently, one
   // 18 km artefact flattens the real ride to a hairline on every sparkline.
-  final points = segmentTrackPoints(rawPoints).points;
+  final segmented = segmentTrackPoints(rawPoints);
+  final points = segmented.points;
   if (points.length < 2) {
     return (
       key: null,
@@ -92,7 +97,7 @@ double? deriveSmoothness(List<TrackPoint> points) =>
   // neither is gated behind the route-distance floor that nulls the key.
   final lean = deriveLean(points);
   return (
-    key: _routeKeyFor(ride, points),
+    key: _routeKeyFor(ride, segmented),
     blob: encodeRouteBlob([
       for (final p in points) (lat: p.latitude, lon: p.longitude),
     ]),
@@ -104,14 +109,22 @@ double? deriveSmoothness(List<TrackPoint> points) =>
 
 /// The ride's route key, or null when it never travelled far enough to have gone
 /// anywhere at all — see [kRouteMinDistanceMeters].
-String? _routeKeyFor(Ride ride, List<TrackPoint> points) {
+///
+/// Keyed off the **main cluster's** endpoints, not the track's own first and last
+/// fix. A phantom at either end survives segmentation by design (see
+/// [SegmentedTrack.mainStart]), and the key is a claim about where the ride began
+/// and ended: one bad endpoint invents a route nobody rode, and every future ride
+/// from the real start then fails to match it.
+String? _routeKeyFor(Ride ride, SegmentedTrack<TrackPoint> track) {
   if (ride.totalDistanceMeters < kRouteMinDistanceMeters) return null;
+  final start = track.mainStart, end = track.mainEnd;
+  if (start == null || end == null) return null;
   return buildRouteKey(
     startTime: ride.startTime,
-    startLat: points.first.latitude,
-    startLon: points.first.longitude,
-    endLat: points.last.latitude,
-    endLon: points.last.longitude,
+    startLat: start.latitude,
+    startLon: start.longitude,
+    endLat: end.latitude,
+    endLon: end.longitude,
   );
 }
 

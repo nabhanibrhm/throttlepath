@@ -76,20 +76,14 @@ class TelemetrySheet extends StatelessWidget {
   final VoidCallback onResume;
   final VoidCallback onSkipCountdown;
 
-  /// The telemetry on display: the in-progress ride while tracking, otherwise the
-  /// last finished ride's finalised numbers.
-  LiveTelemetry? get _t =>
-      state.isTracking ? state.telemetry : (state.lastFinished ?? state.telemetry);
+  /// The telemetry on display and the clock freeze both come off
+  /// [TrackingUiState] now — the PiP card branches on the same rules, and they
+  /// must not be able to disagree. (`isSignalLost` is reached through
+  /// [TrackingUiState.isFrozen]; the sheet's own branch is "frozen but not
+  /// paused", which can only be the blackout.)
+  LiveTelemetry? get _t => state.displayTelemetry;
 
-  /// GPS has gone silent long enough to count as a blackout, without the rider
-  /// asking for anything. The engine freezes the ride clock in this case exactly
-  /// as a pause does, so the screen has to admit it.
-  bool get _isSignalLost =>
-      state.phase == 'recording' && (_t?.signalLost ?? false) && !state.isPaused;
-
-  /// The ride clock has stopped advancing — by pause, or by blackout. Everything
-  /// downstream of this reads as "these numbers are no longer moving".
-  bool get _isFrozen => state.isPaused || _isSignalLost;
+  bool get _isFrozen => state.isFrozen;
 
   @override
   Widget build(BuildContext context) {

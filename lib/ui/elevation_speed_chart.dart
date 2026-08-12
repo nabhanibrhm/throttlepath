@@ -137,44 +137,66 @@ class _ElevationSpeedChartState extends State<ElevationSpeedChart> {
         points.last.timestamp.difference(start).inMilliseconds / 1000.0;
     final maxX = totalSec <= 0 ? 1.0 : totalSec;
 
+    // Where each series has to be cut. The elevation series is indexed over the
+    // altitude-carrying subset, so it reuses the `resumed` flags already computed
+    // for the gain/loss re-anchor; the speed series spans every point, so it takes
+    // its breaks from the shared timestamp rule.
+    //
+    // This is the other half of a fix that was previously only half done: the
+    // blackout was already excluded from the gain/loss *sums* but still drawn, so
+    // the takeaway line and the shape above it disagreed about the same dead zone.
+    final elevBreaks = [
+      for (var i = 1; i < resumed.length; i++)
+        if (resumed[i]) i,
+    ];
+    final speedBreaks = runStartIndices(points, fixOf: trackPointFix);
+
     // Bars are built conditionally, so remember what each index *is* — the
     // tooltip has to un-map elevation back to metres and must not do that to the
-    // speed line when only one series is showing.
+    // speed line when only one series is showing. One series can now contribute
+    // several bars (one per contiguous run), so this stays index-aligned by being
+    // appended to per bar rather than per series.
     final bars = <LineChartBarData>[];
     final isElevBar = <bool>[];
     if (_showElev) {
-      bars.add(
-        LineChartBarData(
-          spots: downsampleSpots(elevScaled, kChartMaxPoints),
-          isCurved: true,
-          curveSmoothness: 0.2,
-          preventCurveOverShooting: true,
-          color: cx.positive.withValues(alpha: 0.85),
-          barWidth: 1.5,
-          dotData: const FlDotData(show: false),
-          belowBarData: BarAreaData(
-            show: true,
-            color: cx.positive.withValues(alpha: 0.20),
+      for (final piece
+          in splitAndDownsample(elevScaled, elevBreaks, kChartMaxPoints)) {
+        bars.add(
+          LineChartBarData(
+            spots: piece,
+            isCurved: true,
+            curveSmoothness: 0.2,
+            preventCurveOverShooting: true,
+            color: cx.positive.withValues(alpha: 0.85),
+            barWidth: 1.5,
+            dotData: const FlDotData(show: false),
+            belowBarData: BarAreaData(
+              show: true,
+              color: cx.positive.withValues(alpha: 0.20),
+            ),
           ),
-        ),
-      );
-      isElevBar.add(true);
+        );
+        isElevBar.add(true);
+      }
     }
     if (_showSpeed) {
-      bars.add(
-        LineChartBarData(
-          spots: downsampleSpots(speed, kChartMaxPoints),
-          isCurved: true,
-          curveSmoothness: 0.2,
-          preventCurveOverShooting: true,
-          color: cx.accent,
-          barWidth: 2,
-          isStrokeCapRound: true,
-          dotData: const FlDotData(show: false),
-          belowBarData: BarAreaData(show: false),
-        ),
-      );
-      isElevBar.add(false);
+      for (final piece
+          in splitAndDownsample(speed, speedBreaks, kChartMaxPoints)) {
+        bars.add(
+          LineChartBarData(
+            spots: piece,
+            isCurved: true,
+            curveSmoothness: 0.2,
+            preventCurveOverShooting: true,
+            color: cx.accent,
+            barWidth: 2,
+            isStrokeCapRound: true,
+            dotData: const FlDotData(show: false),
+            belowBarData: BarAreaData(show: false),
+          ),
+        );
+        isElevBar.add(false);
+      }
     }
 
     return ChartFrame(

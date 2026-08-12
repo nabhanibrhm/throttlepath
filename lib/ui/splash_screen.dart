@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/database_service.dart';
+import '../services/ride_recovery.dart';
 import '../services/tile_cache_service.dart';
 import '../services/tracking_service.dart';
 import '../theme/app_theme.dart';
@@ -53,6 +54,18 @@ class _SplashScreenState extends State<SplashScreen>
     await DatabaseService.instance.open();
     await TileCacheService.configure();
     await TrackingService.instance.configure();
+    // Close out any ride the OS killed mid-recording. Must come after
+    // `configure()`, because its guard asks whether a ride is running right now.
+    //
+    // Failures are swallowed rather than surfaced through `_error`: this is
+    // repair work on old data, and a rider who cannot open the app because a
+    // previous ride will not finalise is worse off than one whose stranded ride
+    // stays stranded for another launch.
+    try {
+      await RideRecovery.run();
+    } catch (_) {
+      // best-effort; retried on the next launch
+    }
   }
 
   @override

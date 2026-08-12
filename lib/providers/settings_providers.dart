@@ -157,6 +157,42 @@ final keepScreenOnProvider =
   (ref) => KeepScreenOnController(false),
 );
 
+/// Holds the "shrink into a floating window when I leave the app mid-ride"
+/// preference.
+///
+/// Self-loading rather than seeded from `main()`, unlike the theme and unit: those
+/// are seeded to stop a flash of the wrong value on the *first frame*, and this has
+/// no such stake. Nothing reads it until either a rider opens Settings or a ride
+/// starts, both far beyond the first frame. It also starts at its real default
+/// (`true`), so the only window where the in-memory value can disagree with disk is
+/// for a rider who turned it *off*, during a launch in which no ride is yet live —
+/// and arming only happens once one is.
+class PipEnabledController extends StateNotifier<bool> {
+  PipEnabledController() : super(true) {
+    _load();
+  }
+
+  Future<void> _load() async {
+    state = await SettingsService.instance.loadPipEnabled();
+  }
+
+  Future<void> set(bool enabled) async {
+    if (enabled == state) return;
+    state = enabled;
+    await SettingsService.instance.savePipEnabled(enabled);
+  }
+
+  Future<void> toggle() => set(!state);
+}
+
+/// Whether a recording ride enters Picture-in-Picture when the rider leaves the
+/// app. **On by default** — see `SettingsService.loadPipEnabled` for why this flag
+/// differs from the others.
+final pipEnabledProvider =
+    StateNotifierProvider<PipEnabledController, bool>(
+  (ref) => PipEnabledController(),
+);
+
 /// Holds the rolling window of GNSS time-to-first-fix samples.
 ///
 /// The one store here that loads itself instead of being seeded from `main()`:

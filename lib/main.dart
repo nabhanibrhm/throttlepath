@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'providers/settings_providers.dart';
 import 'services/settings_service.dart';
 import 'theme/app_theme.dart';
+import 'ui/pip_host.dart';
 import 'ui/splash_screen.dart';
 
 Future<void> main() async {
@@ -72,6 +73,10 @@ class ThrottlePathApp extends ConsumerWidget {
       theme: buildLightTheme(),
       darkTheme: buildDarkTheme(),
       themeMode: mode,
+      // Picture-in-Picture wraps the Navigator, not `home` — the splash reaches
+      // HomeShell via `pushReplacement`, which would tear out anything wrapping
+      // `home`. `child` is non-null for every route MaterialApp builds.
+      builder: (context, child) => PipHost(child: child ?? const SizedBox()),
       home: const SplashScreen(),
     );
   }

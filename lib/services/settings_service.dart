@@ -23,6 +23,7 @@ class SettingsService {
   static const _speedGaugeStyleFileName = 'speed_gauge_style.txt';
   static const _countdownFileName = 'countdown_enabled.txt';
   static const _keepScreenOnFileName = 'keep_screen_on.txt';
+  static const _pipEnabledFileName = 'pip_enabled.txt';
   static const _ttffSamplesFileName = 'gnss_ttff.txt';
 
   Future<File> _resolveNamed(String name) async {
@@ -108,6 +109,22 @@ class SettingsService {
   Future<void> saveKeepScreenOn(bool enabled) =>
       _saveFlag(_keepScreenOnFileName, enabled);
 
+  /// Whether a recording ride shrinks into a Picture-in-Picture window when the
+  /// rider leaves the app.
+  ///
+  /// **The one flag here that defaults to on.** The others are opt-in because they
+  /// cost something the rider should choose to spend — battery, or a delay before
+  /// every ride. This one costs nothing until the rider backgrounds the app
+  /// mid-ride, and at that moment it is the behaviour they want: it is the
+  /// alternative to losing sight of the ride entirely. Off by default would mean
+  /// the feature is never found.
+  Future<bool> loadPipEnabled() =>
+      _loadFlag(_pipEnabledFileName, fallback: true);
+
+  /// Persists the Picture-in-Picture preference. Best-effort.
+  Future<void> savePipEnabled(bool enabled) =>
+      _saveFlag(_pipEnabledFileName, enabled);
+
   /// Recent GNSS time-to-first-fix readings in milliseconds, oldest first.
   ///
   /// Not a preference the rider sets — a measurement of their phone. It lives
@@ -129,10 +146,15 @@ class SettingsService {
       .whereType<int>()
       .toList();
 
-  /// Shared reader for the boolean prefs. Absent file or unreadable value reads
-  /// as false, so every flag defaults to off.
-  Future<bool> _loadFlag(String name) =>
-      _loadTag(name, (tag) => tag == '1', false);
+  /// Shared reader for the boolean prefs. An absent file or unreadable value
+  /// reads as [fallback], which each flag states for itself — most default to
+  /// off, PiP to on.
+  ///
+  /// Note the parse is `tag == '1'` regardless of [fallback]: a file that exists
+  /// but holds something unexpected means off, not "whatever the default was".
+  /// Only the *absence* of a decision falls back.
+  Future<bool> _loadFlag(String name, {bool fallback = false}) =>
+      _loadTag(name, (tag) => tag == '1', fallback);
 
   Future<void> _saveFlag(String name, bool value) =>
       _saveTag(name, value ? '1' : '0');

@@ -152,7 +152,12 @@ final nearbyOpenTripProvider =
   for (final trip in await db.getOpenTrips()) {
     final stints = await db.getStintsForTrip(trip.id);
     if (stints.isEmpty) continue;
-    final end = await db.getLastTrackPoint(stints.last.id);
+    // Where the last stint really ended, not its stored last fix: a phantom tail
+    // survives segmentation by design, and one kilometres away would either offer
+    // to continue a trip the rider is nowhere near, or fail to offer the one they
+    // are standing at the end of. See [rideEndpoints].
+    final end =
+        rideEndpoints(await db.getTrackPointsForRide(stints.last.id)).end;
     if (end == null) continue;
     final meters = haversineMeters(
         pos.latitude, pos.longitude, end.latitude, end.longitude);

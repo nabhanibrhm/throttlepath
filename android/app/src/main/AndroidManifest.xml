@@ -34,12 +34,19 @@
         android:label="ThrottlePath"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        <!-- supportsPictureInPicture: keeps live telemetry visible in a small
+             floating window while the rider is in another app mid-ride. API 26+
+             only, and PipController re-checks at runtime because minSdk is 24.
+             The configChanges list below already covers the screen-size and
+             density changes a PiP resize triggers, so the activity is not
+             recreated and the in-progress ride's UI state survives it. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
             android:taskAffinity=""
             android:theme="@style/LaunchTheme"
+            android:supportsPictureInPicture="true"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize">

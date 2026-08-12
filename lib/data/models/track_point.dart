@@ -59,3 +59,20 @@ TrackFix trackPointFix(TrackPoint p) =>
 /// [points] split into runs with any displaced excursion removed.
 SegmentedTrack<TrackPoint> segmentTrackPoints(List<TrackPoint> points) =>
     segmentTrack(points, fixOf: trackPointFix);
+
+/// Where a ride really started and ended, ignoring a phantom at either end.
+///
+/// The reason to prefer this over the cheap indexed `getFirstTrackPoint` /
+/// `getLastTrackPoint` queries: those return the *stored* extremes, and a displaced
+/// excursion at the head or tail of a track is deliberately never dropped by
+/// [segmentTrack] — see [SegmentedTrack.mainStart]. Anything answering "where was
+/// this ride" from the stored extremes therefore answers with a place the rider
+/// was never at, kilometres away.
+///
+/// Costs a full track read where the indexed queries cost two rows. That is the
+/// price of the right answer, and both callers are already off the hot path
+/// (a bounded post-save backfill, and a user-initiated relabel with a progress bar).
+({TrackPoint? start, TrackPoint? end}) rideEndpoints(List<TrackPoint> points) {
+  final track = segmentTrackPoints(points);
+  return (start: track.mainStart, end: track.mainEnd);
+}

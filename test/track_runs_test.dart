@@ -217,4 +217,139 @@ void main() {
       expect(cumulativeMeters(leg(0, 1, homeLat, homeLon), fixOf: fixOf), [0.0]);
     });
   });
+
+  group('mainStart / mainEnd', () {
+    test('are the track ends on a healthy ride', () {
+      final track = leg(0, 200, homeLat, homeLon);
+      final seg = segmentTrack(track, fixOf: fixOf);
+      expect(seg.mainStart, track.first);
+      expect(seg.mainEnd, track.last);
+    });
+
+    test('are the track ends across an ordinary blackout', () {
+      final track = [
+        ...leg(0, 120, homeLat, homeLon),
+        ...leg(600, 120, homeLat, homeLon),
+      ];
+      final seg = segmentTrack(track, fixOf: fixOf);
+      expect(seg.mainStart, track.first);
+      expect(seg.mainEnd, track.last);
+    });
+
+    test('skip a head phantom that segmentation cannot drop', () {
+      // The case P2 exists for. A short spray of fixes 17.9 km away opens the
+      // track; nothing precedes it, so it can never be bracketed and is kept.
+      final track = [
+        ...leg(0, 30, driftLat, driftLon),
+        ...leg(200, 300, homeLat, homeLon),
+      ];
+
+      final seg = segmentTrack(track, fixOf: fixOf);
+
+      expect(seg.discardedCount, 0,
+          reason: 'a head cluster is structurally undroppable');
+      expect(seg.points.first.lat, closeTo(driftLat, 0.001),
+          reason: 'the geometry still carries it');
+      expect(seg.mainStart!.lat, closeTo(homeLat, 0.05),
+          reason: 'but it does not get to say where the ride started');
+      expect(seg.mainEnd, track.last);
+    });
+
+    test('skip a tail phantom that segmentation cannot drop', () {
+      final track = [
+        ...leg(0, 300, homeLat, homeLon),
+        ...leg(400, 30, driftLat, driftLon),
+      ];
+
+      final seg = segmentTrack(track, fixOf: fixOf);
+
+      expect(seg.discardedCount, 0);
+      expect(seg.mainStart, track.first);
+      expect(seg.mainEnd!.lat, closeTo(homeLat, 0.05));
+    });
+
+    test('keep a large relocation — a tunnel is not a phantom', () {
+      // Same shape as the tail-phantom case, but the rider carries on for far too
+      // long at the new place for it to be an artefact. Disowning this endpoint
+      // would misreport where a real ride finished.
+      final track = [
+        ...leg(0, 60, homeLat, homeLon),
+        ...leg(200, 400, driftLat, driftLon),
+      ];
+
+      final seg = segmentTrack(track, fixOf: fixOf);
+
+      expect(seg.discardedCount, 0);
+      expect(seg.mainEnd!.lat, closeTo(driftLat, 0.05),
+          reason: 'the new place holds most of the ride, so it is the ride');
+    });
+
+    test('survive a dropped excursion', () {
+      final track = [
+        ...leg(0, 300, homeLat, homeLon),
+        ...leg(1500, 49, driftLat, driftLon),
+        ...leg(1600, 60, homeLat, homeLon),
+      ];
+
+      final seg = segmentTrack(track, fixOf: fixOf);
+
+      expect(seg.discardedCount, 49);
+      expect(seg.mainStart, track.first);
+      expect(seg.mainEnd, track.last);
+    });
+
+    test('are null only for an empty track', () {
+      final empty = segmentTrack(<Fix>[], fixOf: fixOf);
+      expect(empty.mainStart, isNull);
+      expect(empty.mainEnd, isNull);
+
+      final single = segmentTrack(leg(0, 1, homeLat, homeLon), fixOf: fixOf);
+      expect(single.mainStart, isNotNull);
+      expect(single.mainEnd, isNotNull);
+    });
+  });
+
+  group('kMaxDisplacedShare is a whole-ride budget', () {
+    test('several small excursions cannot cumulatively exceed it', () {
+      // Four excursions at ~11% each. Tested per cluster they all clear the 15%
+      // cap and take away 45% of the ride between them, which is the failure this
+      // guards: the cap is a budget, not an allowance each one gets to spend.
+      //
+      // All four sit at the *same* displaced spot, which matters — they cluster
+      // together, so this also pins that a single cluster spread across four runs
+      // is measured as one.
+      final track = [
+        ...leg(0, 60, homeLat, homeLon),
+        ...leg(100, 30, driftLat, driftLon),
+        ...leg(200, 30, homeLat, homeLon),
+        ...leg(300, 30, driftLat, driftLon),
+        ...leg(400, 30, homeLat, homeLon),
+        ...leg(500, 30, driftLat, driftLon),
+        ...leg(600, 30, homeLat, homeLon),
+        ...leg(700, 30, driftLat, driftLon),
+        ...leg(800, 60, homeLat, homeLon),
+      ];
+
+      final seg = segmentTrack(track, fixOf: fixOf);
+
+      final displacedShare = seg.discardedCount / track.length;
+      expect(displacedShare, lessThanOrEqualTo(0.5),
+          reason: 'never more than the ride');
+      // The four displaced runs form one cluster holding ~40% of the recorded
+      // time, so the budget refuses it outright and they are all kept as breaks.
+      expect(seg.discardedCount, 0,
+          reason: 'over budget as one cluster — kept, not deleted');
+    });
+
+    test('a single small excursion still drops', () {
+      final track = [
+        ...leg(0, 300, homeLat, homeLon),
+        ...leg(1500, 40, driftLat, driftLon),
+        ...leg(1600, 300, homeLat, homeLon),
+      ];
+
+      final seg = segmentTrack(track, fixOf: fixOf);
+      expect(seg.discardedCount, 40, reason: 'inside the budget');
+    });
+  });
 }

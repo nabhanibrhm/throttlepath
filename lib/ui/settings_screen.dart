@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers/history_providers.dart';
+import '../providers/pip_providers.dart';
 import '../providers/settings_providers.dart';
 import '../services/geocode_backfill.dart';
 import '../services/rides_csv_export.dart';
@@ -39,6 +40,7 @@ class SettingsScreen extends ConsumerWidget {
     final gaugeStyle = ref.watch(speedGaugeStyleProvider);
     final countdown = ref.watch(countdownEnabledProvider);
     final keepScreenOn = ref.watch(keepScreenOnProvider);
+    final pipEnabled = ref.watch(pipEnabledProvider);
 
     return Scaffold(
       backgroundColor: cx.canvas,
@@ -117,6 +119,26 @@ class SettingsScreen extends ConsumerWidget {
             onTap: () => ref.read(keepScreenOnProvider.notifier).toggle(),
             semanticToggled: keepScreenOn,
           ),
+          // Absent entirely below API 26, or on a device without the PiP feature —
+          // not shown disabled. A greyed row invites the rider to work out why,
+          // and the answer ("your Android is too old") is not something they can
+          // act on. `valueOrNull` reads false while the check is in flight, so the
+          // row appears a frame late rather than flickering out.
+          if (ref.watch(pipSupportedProvider).valueOrNull ?? false)
+            _SettingsTile(
+              title: 'Floating window',
+              subtitle: pipEnabled
+                  ? 'Leaving the app mid-ride shrinks it to a small window with '
+                      'live speed, distance and time. Tap it to come back.'
+                  : 'Leaving the app mid-ride shows nothing. Recording carries on '
+                      'either way.',
+              trailing: _Toggle(
+                value: pipEnabled,
+                onChanged: (_) => ref.read(pipEnabledProvider.notifier).toggle(),
+              ),
+              onTap: () => ref.read(pipEnabledProvider.notifier).toggle(),
+              semanticToggled: pipEnabled,
+            ),
 
           const SectionLabel(label: 'Data', rule: false),
           const _ExportRidesTile(),

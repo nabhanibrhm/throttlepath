@@ -52,3 +52,41 @@ List<T> downsample<T>(List<T> xs, int max) {
   out.add(xs.last);
   return out;
 }
+
+/// Cuts [spots] at each index in [breaks] and thins each piece, so a series that
+/// spans a GPS blackout can be drawn as several lines instead of one.
+///
+/// A single `LineChartBarData` has no notion of a discontinuity: fl_chart joins
+/// consecutive spots, and on a **time** axis a dead zone is a long horizontal
+/// stretch the line slopes straight across — asserting a climb and a speed the
+/// rider was never measured at. Only one bar per contiguous run avoids that.
+///
+/// [max] is the budget for the whole series, split between the pieces in
+/// proportion to their length rather than handed to each: [kChartMaxPoints] exists
+/// to cap the work fl_chart does per frame, and a per-piece cap would quietly
+/// multiply that by the number of blackouts. Two points is the floor, since a
+/// single-point run cannot be drawn as a line but also must not be dropped.
+List<List<FlSpot>> splitAndDownsample(
+  List<FlSpot> spots,
+  List<int> breaks,
+  int max,
+) {
+  if (spots.isEmpty) return const [];
+  if (breaks.isEmpty) return [downsampleSpots(spots, max)];
+
+  final pieces = <List<FlSpot>>[];
+  var from = 0;
+  for (final at in [...breaks, spots.length]) {
+    if (at > from) pieces.add(spots.sublist(from, at));
+    from = at;
+  }
+
+  final total = spots.length;
+  return [
+    for (final piece in pieces)
+      downsampleSpots(
+        piece,
+        math.max(2, (max * piece.length / total).round()),
+      ),
+  ];
+}

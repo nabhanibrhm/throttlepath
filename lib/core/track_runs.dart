@@ -50,9 +50,13 @@ const int kSignalLossSeconds = 12;
 /// hundreds of metres. A tight radius would start carving up legitimate rides.
 const double kTrackClusterLinkMeters = 1000;
 
-/// A displaced cluster is only discarded while it stays under this share of the
-/// ride's recorded time. Past it, the "excursion" is too much of the ride to be
-/// an artefact, and throwing it away would lose real riding.
+/// Ceiling on how much of a ride's recorded time may be discarded as displaced —
+/// **summed across every excursion**, not per excursion. Past it, what is being
+/// thrown away is too much of the ride to be an artefact.
+///
+/// The distinction is the whole point: applied per cluster, four separate
+/// excursions at 14% each all cleared a 15% cap and between them deleted 56% of the
+/// ride. `segmentTrack` spends this as one budget, smallest excursion first.
 const double kMaxDisplacedShare = 0.15;
 
 /// The minimum of a fix this module needs. Callers adapt their own types to it.
@@ -64,7 +68,12 @@ typedef TrackFix = ({DateTime time, double lat, double lon});
 /// *between* them. [discarded] holds what was dropped, so a caller can tell the
 /// rider their track was edited instead of quietly editing it.
 class SegmentedTrack<T> {
-  const SegmentedTrack({required this.runs, required this.discarded});
+  const SegmentedTrack({
+    required this.runs,
+    required this.discarded,
+    this.mainStart,
+    this.mainEnd,
+  });
 
   /// An empty track — no runs, nothing discarded.
   static SegmentedTrack<T> empty<T>() =>
@@ -72,6 +81,27 @@ class SegmentedTrack<T> {
 
   final List<List<T>> runs;
   final List<List<T>> discarded;
+
+  /// First and last fix of the ride's **main cluster** — where the rider actually
+  /// started and finished, as opposed to where the track happens to begin and end.
+  ///
+  /// These exist because [segmentTrack]'s bracketing rule *structurally cannot*
+  /// drop a displaced excursion at the head or the tail of a track, and that is on
+  /// purpose: a ride that legitimately relocates and carries on (a long tunnel, a
+  /// ferry) has nothing after the displacement to bracket it, and amputating its
+  /// tail would delete real riding. The cost is that a phantom first or last fix
+  /// survives into [runs] — and anything that reads `points.first` / `points.last`
+  /// to answer *where was this ride* then answers with the phantom: the route key,
+  /// the start/end place names, and the "continue a nearby trip?" nudge.
+  ///
+  /// So the geometry keeps the phantom (dropping it is not safe) and the
+  /// *endpoints* skip it (trusting it is not honest) — but only while the cluster
+  /// holding that endpoint is small enough to be an artefact, by the same
+  /// [kMaxDisplacedShare] budget. A rider who legitimately relocates and then rides
+  /// for forty minutes keeps their real endpoint; a brief spray of fixes 18 km away
+  /// does not. Null only for an empty track.
+  final T? mainStart;
+  final T? mainEnd;
 
   /// The kept fixes, flattened back into one list in capture order. What every
   /// consumer that doesn't care about the joins should be reading.
@@ -174,15 +204,24 @@ SegmentedTrack<T> segmentTrack<T>(
   int gapSeconds = kSignalLossSeconds,
 }) {
   final runs = splitIntoRuns(points, fixOf: fixOf, gapSeconds: gapSeconds);
-  if (runs.length < 2) {
-    return SegmentedTrack(runs: runs, discarded: const []);
-  }
+  if (runs.isEmpty) return SegmentedTrack.empty<T>();
+
+  // With one cluster there is no displacement anywhere, so the track's own ends
+  // *are* the main cluster's ends. Stated once here rather than left null, so no
+  // consumer has to carry a "if the endpoints are missing, fall back to first/last"
+  // branch — which is the very code that had the bug.
+  SegmentedTrack<T> undisplaced() => SegmentedTrack(
+        runs: runs,
+        discarded: const [],
+        mainStart: runs.first.first,
+        mainEnd: runs.last.last,
+      );
+
+  if (runs.length < 2) return undisplaced();
 
   final boxes = [for (final run in runs) _Box.of(run, fixOf)];
   final clusters = _clusterRuns(boxes);
-  if (clusters.length < 2) {
-    return SegmentedTrack(runs: runs, discarded: const []);
-  }
+  if (clusters.length < 2) return undisplaced();
 
   double durationOf(Iterable<int> runIndices) => runIndices.fold(0.0, (sum, i) {
         final run = runs[i];
@@ -211,20 +250,72 @@ SegmentedTrack<T> segmentTrack<T>(
   final mainFirst = fixOf(runs[main.reduce(math.min)].first).time;
   final mainLast = fixOf(runs[main.reduce(math.max)].last).time;
 
-  final drop = <int>{};
+  double shareOf(Set<int> cluster) =>
+      totalDuration <= 0 ? 1.0 : durationOf(cluster) / totalDuration;
+
+  // Which run the reported endpoints come from.
+  //
+  // A displaced cluster at the head or tail cannot be *dropped* — see
+  // [SegmentedTrack.mainStart] — but that is not the same as trusting it to say
+  // where the ride began and ended. The complication is that one data shape means
+  // two different things: a stale-ephemeris phantom, and a rider who genuinely
+  // relocated (a long tunnel, a ferry) and carried on from the new place.
+  //
+  // So the endpoint is only disowned while the cluster holding it is small enough
+  // to be an artefact — the same [kMaxDisplacedShare] budget the drop decision
+  // spends. A brief spray of fixes 18 km away loses its claim on the ride's
+  // endpoints; forty minutes of riding after a tunnel keeps it, because at that
+  // size it is the ride, whatever else the coordinates suggest.
+  //
+  // When the head or tail cluster *is* the main cluster these both collapse to
+  // `runs.first` / `runs.last` anyway, so there is one rule, not a special case.
+  Set<int> clusterOf(int runIndex) =>
+      clusters.firstWhere((c) => c.contains(runIndex));
+
+  final headCluster = clusterOf(0);
+  final tailCluster = clusterOf(runs.length - 1);
+  final mainStartRun =
+      !identical(headCluster, main) && shareOf(headCluster) <= kMaxDisplacedShare
+          ? runs[main.reduce(math.min)]
+          : runs.first;
+  final mainEndRun =
+      !identical(tailCluster, main) && shareOf(tailCluster) <= kMaxDisplacedShare
+          ? runs[main.reduce(math.max)]
+          : runs.last;
+
+  // Every cluster that clears the two per-cluster tests, with its share of the
+  // ride's recorded time, smallest first.
+  final candidates = <({Set<int> cluster, double share})>[];
   for (final cluster in clusters) {
     if (identical(cluster, main)) continue;
     final first = fixOf(runs[cluster.reduce(math.min)].first).time;
     final last = fixOf(runs[cluster.reduce(math.max)].last).time;
-    final bracketed = first.isAfter(mainFirst) && last.isBefore(mainLast);
-    final share =
-        totalDuration <= 0 ? 1.0 : durationOf(cluster) / totalDuration;
-    if (bracketed && share <= kMaxDisplacedShare) drop.addAll(cluster);
+    if (!first.isAfter(mainFirst) || !last.isBefore(mainLast)) continue;
+    candidates.add((cluster: cluster, share: shareOf(cluster)));
+  }
+  candidates.sort((a, b) => a.share.compareTo(b.share));
+
+  // [kMaxDisplacedShare] is a budget for the whole ride, not an allowance each
+  // excursion gets to spend separately. Tested per cluster, four excursions at 14%
+  // apiece each passed a 15% cap and took away 56% of the ride between them — the
+  // one thing the cap exists to prevent.
+  //
+  // Smallest first, and stop at the first that doesn't fit rather than skipping it
+  // to try the next: the list is sorted ascending, so nothing after it fits either.
+  // What that leaves is the safe failure — an excursion too big for the budget is
+  // *kept*, and renders as an ordinary break, because drawing a phantom is cosmetic
+  // and deleting real riding is not.
+  final drop = <int>{};
+  var droppedShare = 0.0;
+  for (final candidate in candidates) {
+    if (droppedShare + candidate.share > kMaxDisplacedShare) break;
+    drop.addAll(candidate.cluster);
+    droppedShare += candidate.share;
   }
 
-  if (drop.isEmpty) {
-    return SegmentedTrack(runs: runs, discarded: const []);
-  }
+  // Note the endpoints are the main cluster's either way, including when nothing
+  // was dropped — that case is precisely the head/tail phantom, where the geometry
+  // is deliberately left intact and only the endpoints move.
   return SegmentedTrack(
     runs: [
       for (var i = 0; i < runs.length; i++)
@@ -234,6 +325,8 @@ SegmentedTrack<T> segmentTrack<T>(
       for (var i = 0; i < runs.length; i++)
         if (drop.contains(i)) runs[i],
     ],
+    mainStart: mainStartRun.first,
+    mainEnd: mainEndRun.last,
   );
 }
 

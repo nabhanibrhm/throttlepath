@@ -1,4 +1,5 @@
 import '../data/database_service.dart';
+import '../data/models/track_point.dart';
 import 'geocoding_service.dart';
 
 /// Best-effort backfill of missing ride start/end place names.
@@ -37,19 +38,20 @@ class GeocodeBackfill {
         var startPlace = ride.startPlace;
         var endPlace = ride.endPlace;
 
-        if (startPlace == null) {
-          final start = await db.getFirstTrackPoint(ride.id);
-          if (start != null) {
-            startPlace =
-                await GeocodingService.placeName(start.latitude, start.longitude);
-          }
+        // The main cluster's endpoints, not the stored first/last fix — a phantom
+        // at either end would otherwise name the ride after somewhere the rider
+        // never was. See [rideEndpoints].
+        final ends = startPlace == null || endPlace == null
+            ? rideEndpoints(await db.getTrackPointsForRide(ride.id))
+            : const (start: null, end: null);
+
+        if (startPlace == null && ends.start != null) {
+          startPlace = await GeocodingService.placeName(
+              ends.start!.latitude, ends.start!.longitude);
         }
-        if (endPlace == null) {
-          final end = await db.getLastTrackPoint(ride.id);
-          if (end != null) {
-            endPlace =
-                await GeocodingService.placeName(end.latitude, end.longitude);
-          }
+        if (endPlace == null && ends.end != null) {
+          endPlace = await GeocodingService.placeName(
+              ends.end!.latitude, ends.end!.longitude);
         }
 
         // Nothing new resolved (still offline / genuinely unresolvable) — skip
@@ -86,8 +88,11 @@ class GeocodeBackfill {
       for (var i = 0; i < rides.length; i++) {
         final ride = rides[i];
 
-        final startPt = await db.getFirstTrackPoint(ride.id);
-        final endPt = await db.getLastTrackPoint(ride.id);
+        // Main-cluster endpoints, for [run]'s reason: this is the surface that
+        // *fixes* a badly-named ride, so it must not re-apply the phantom's name.
+        final ends = rideEndpoints(await db.getTrackPointsForRide(ride.id));
+        final startPt = ends.start;
+        final endPt = ends.end;
 
         // Re-geocode where we have a fix; on failure fall back to the old value.
         final startPlace = startPt == null

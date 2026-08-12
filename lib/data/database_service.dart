@@ -108,6 +108,27 @@ class DatabaseService {
         .findFirst();
   }
 
+  /// Rides with no [Ride.endTime], oldest first — recordings that never finalised
+  /// because the OS killed the process mid-ride.
+  ///
+  /// A ride in this state is *stranded*, not lost: the engine persists its running
+  /// aggregates and every track point as it goes, so all that is missing is the
+  /// end stamp and the derived route fields. But the missing end stamp is what
+  /// leaves it stuck — [getStandaloneRides] has no end-time filter so it still
+  /// appears in History, while [getRidesMissingDerived] is gated on
+  /// `endTimeIsNotNull` so it can never acquire a route key, shape or lean figures.
+  ///
+  /// Oldest first because that is the order they should be finalised in, and
+  /// because the newest one may be the ride still recording right now — see
+  /// `RideRecovery` for the guard that keeps this away from it.
+  Future<List<Ride>> getUnfinishedRides() {
+    return isar.rides
+        .filter()
+        .endTimeIsNull()
+        .sortByStartTime()
+        .findAll();
+  }
+
   /// Rides still missing at least one place name, newest first — the work-list
   /// for the best-effort geocode backfill (rides saved while offline, or where
   /// the platform geocoder dropped one of the pair).

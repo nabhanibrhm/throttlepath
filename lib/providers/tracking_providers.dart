@@ -6,6 +6,7 @@ import 'package:latlong2/latlong.dart';
 
 import '../core/date_format.dart';
 import '../data/database_service.dart';
+import '../data/models/track_point.dart';
 import '../data/models/trip.dart';
 import '../services/geocoding_service.dart';
 import '../services/gnss_status.dart';
@@ -125,6 +126,28 @@ class TrackingUiState {
   final int? continuingTripId;
   final String? continuingTripName;
   final String? error;
+
+  /// The telemetry a screen should report on: the in-progress ride while
+  /// tracking, otherwise the last finished ride's finalised numbers.
+  LiveTelemetry? get displayTelemetry =>
+      isTracking ? telemetry : (lastFinished ?? telemetry);
+
+  /// GPS has gone silent long enough to count as a blackout, without the rider
+  /// asking for anything. The engine freezes the ride clock in this case exactly
+  /// as a pause does, so any surface showing the clock has to admit it.
+  ///
+  /// Lives on the state rather than in a widget because two surfaces now branch
+  /// on it — the telemetry sheet and the Picture-in-Picture card — and a second
+  /// copy of the rule is how the read and write paths came to disagree about
+  /// `kSignalLossSeconds`.
+  bool get isSignalLost =>
+      phase == 'recording' &&
+      (displayTelemetry?.signalLost ?? false) &&
+      !isPaused;
+
+  /// The ride clock has stopped advancing — by pause, or by blackout. Everything
+  /// downstream reads as "these numbers are no longer moving".
+  bool get isFrozen => isPaused || isSignalLost;
 
   TrackingUiState copyWith({
     bool? isTracking,
@@ -387,7 +410,7 @@ class TrackingController extends StateNotifier<TrackingUiState> {
     if (tripId != null) {
       await DatabaseService.instance.setRideTrip(t.rideId, tripId);
     }
-    _geocodeRide(t.rideId, state.route);
+    _geocodeRide(t.rideId);
   }
 
   /// Resolves the trip this stint belongs to: the trip currently being continued,
@@ -406,15 +429,24 @@ class TrackingController extends StateNotifier<TrackingUiState> {
     return DatabaseService.instance.createTrip(trip);
   }
 
-  /// Reverse-geocodes the ride's first/last fix and persists the place names —
-  /// fire-and-forget and off the save path, so returning to idle is instant and
-  /// stays offline-first. If the lookup succeeds, the names simply appear on the
-  /// next History refresh; if it fails (offline), nothing is written.
-  void _geocodeRide(int rideId, List<LatLng> route) {
-    if (route.isEmpty) return;
-    final start = route.first;
-    final end = route.last;
+  /// Reverse-geocodes where the ride really started and ended, and persists the
+  /// place names — fire-and-forget and off the save path, so returning to idle is
+  /// instant and stays offline-first. If the lookup succeeds, the names simply
+  /// appear on the next History refresh; if it fails (offline), nothing is written.
+  ///
+  /// Re-reads the ride's track from the DB rather than taking the endpoints from
+  /// the live `state.route` buffer it used to. That buffer is un-segmented and
+  /// carries no timestamps, so it cannot tell a phantom head/tail fix from a real
+  /// one — and naming a ride after a place the rider was never at is exactly the
+  /// error [rideEndpoints] exists to prevent. The ride has just been persisted, so
+  /// the points are there, and this whole method is already `unawaited`.
+  void _geocodeRide(int rideId) {
     unawaited(() async {
+      final ends = rideEndpoints(
+          await DatabaseService.instance.getTrackPointsForRide(rideId));
+      final start = ends.start;
+      final end = ends.end;
+      if (start == null || end == null) return;
       final startPlace =
           await GeocodingService.placeName(start.latitude, start.longitude);
       // Space the second lookup off the first so the two don't collide with the
