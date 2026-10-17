@@ -24,6 +24,8 @@ class SettingsService {
   static const _countdownFileName = 'countdown_enabled.txt';
   static const _keepScreenOnFileName = 'keep_screen_on.txt';
   static const _pipEnabledFileName = 'pip_enabled.txt';
+  static const _shareScrimFileName = 'share_scrim.txt';
+  static const _shareBasemapFileName = 'share_map.txt';
   static const _ttffSamplesFileName = 'gnss_ttff.txt';
 
   Future<File> _resolveNamed(String name) async {
@@ -124,6 +126,30 @@ class SettingsService {
   /// Persists the Picture-in-Picture preference. Best-effort.
   Future<void> savePipEnabled(bool enabled) =>
       _saveFlag(_pipEnabledFileName, enabled);
+
+  /// Whether a share card is exported with its dark backdrop. **Defaults to on**,
+  /// for the same reason as the flag above: it is the setting that survives the
+  /// case the app cannot see. A sticker dropped onto a bright photo with no
+  /// backdrop is unreadable, and the rider only finds that out after posting it.
+  Future<bool> loadShareScrim() =>
+      _loadFlag(_shareScrimFileName, fallback: true);
+
+  /// Persists the share-backdrop preference. Best-effort.
+  Future<void> saveShareScrim(bool enabled) =>
+      _saveFlag(_shareScrimFileName, enabled);
+
+  /// Whether a share card draws its route over real map tiles. **Defaults to
+  /// off**, unlike the two flags above, and for the opposite reason: those
+  /// default on because the app cannot see the case they protect against. This
+  /// one is a change of what the card *is* — an opaque map panel on a sticker
+  /// otherwise made of nothing — and it is the only share setting that can reach
+  /// for the network. Both are the rider's to opt into.
+  Future<bool> loadShareBasemap() =>
+      _loadFlag(_shareBasemapFileName, fallback: false);
+
+  /// Persists the share-basemap preference. Best-effort.
+  Future<void> saveShareBasemap(bool enabled) =>
+      _saveFlag(_shareBasemapFileName, enabled);
 
   /// Recent GNSS time-to-first-fix readings in milliseconds, oldest first.
   ///

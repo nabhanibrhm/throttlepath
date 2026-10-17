@@ -8,6 +8,7 @@ import '../core/units.dart';
 import '../data/models/ride.dart';
 import '../data/models/track_point.dart';
 import '../ui/share_card.dart';
+import 'share_basemap.dart';
 import 'share_channel.dart';
 import 'widget_to_image.dart';
 
@@ -50,7 +51,9 @@ class RideShare {
     List<TrackPoint> points,
     SpeedUnit unit,
     ShareLayout layout,
+    bool scrim,
     List<int> stintStarts,
+    ShareBasemap? basemap,
   ) async {
     // The off-screen capture only waits a couple of frames, so make sure the
     // brand logo is decoded into the image cache first (otherwise it can render
@@ -66,7 +69,9 @@ class RideShare {
         points: points,
         unit: unit,
         layout: layout,
+        scrim: scrim,
         stintStarts: stintStarts,
+        basemap: basemap,
       ),
       logicalSize: _canvas,
       pixelRatio: _pixelRatio,
@@ -93,10 +98,13 @@ class RideShare {
     required List<TrackPoint> points,
     required SpeedUnit unit,
     required ShareLayout layout,
+    required bool scrim,
     List<int> stintStarts = const [],
+    ShareBasemap? basemap,
   }) async {
     final pngBytes =
-        await _renderPng(context, ride, points, unit, layout, stintStarts);
+        await _renderPng(
+            context, ride, points, unit, layout, scrim, stintStarts, basemap);
     final file = await _writeToCache(ride, pngBytes);
 
     // Hand off to the Android host, which builds the content:// URI via
@@ -127,10 +135,13 @@ class RideShare {
     required List<TrackPoint> points,
     required SpeedUnit unit,
     required ShareLayout layout,
+    required bool scrim,
     List<int> stintStarts = const [],
+    ShareBasemap? basemap,
   }) async {
     final pngBytes =
-        await _renderPng(context, ride, points, unit, layout, stintStarts);
+        await _renderPng(
+            context, ride, points, unit, layout, scrim, stintStarts, basemap);
     final file = await _writeToCache(ride, pngBytes);
     final name = ride.name?.trim();
     await _channel.invokeMethod('shareFile', {
@@ -154,10 +165,13 @@ class RideShare {
     required List<TrackPoint> points,
     required SpeedUnit unit,
     required ShareLayout layout,
+    required bool scrim,
     List<int> stintStarts = const [],
+    ShareBasemap? basemap,
   }) async {
     final pngBytes =
-        await _renderPng(context, ride, points, unit, layout, stintStarts);
+        await _renderPng(
+            context, ride, points, unit, layout, scrim, stintStarts, basemap);
     final file = await _writeToCache(ride, pngBytes);
 
     try {

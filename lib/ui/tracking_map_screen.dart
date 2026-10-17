@@ -21,11 +21,21 @@ import 'ride_summary_screen.dart';
 import 'record_backdrops.dart';
 import 'telemetry_sheet.dart';
 
+/// CARTO basemap API key, baked in at build time from the git-ignored
+/// `secrets.json` (`--dart-define-from-file`, passed by both scripts/ builds).
+///
+/// Since Sept 2026 CARTO serves keyless requests a 200 OK "API KEY REQUIRED"
+/// watermark tile instead of the map, so a build without the key still runs —
+/// it just shows the watermark everywhere, share cards included.
+const _cartoKey = String.fromEnvironment('CARTO_KEY');
+
 /// CartoDB basemap URL for the given brightness — dark tiles on the dark theme,
 /// light tiles on the light theme.
-String basemapUrl(bool isDark) => isDark
-    ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
-    : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png';
+String basemapUrl(bool isDark) {
+  final style = isDark ? 'dark_all' : 'light_all';
+  final key = _cartoKey.isEmpty ? '' : '?key=$_cartoKey';
+  return 'https://{s}.basemaps.cartocdn.com/$style/{z}/{x}/{y}.png$key';
+}
 
 /// "Not recording — paused 1:27 ago", the sentence under the PAUSED chip (F12).
 ///

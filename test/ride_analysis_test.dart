@@ -306,6 +306,44 @@ void main() {
       );
     });
 
+    testWidgets('speed comes from the fix, never from the gap between fixes',
+        (t) async {
+      useDeviceSurface(t);
+      // [track] spaces its fixes ~56 m apart at 1 Hz — a position-derived speed
+      // of roughly 200 km/h — while each fix *reports* 36 km/h, and one reports
+      // 90. The reported figure is the honest one: it is Doppler, measured, and
+      // it is what the engine's own max speed comes from.
+      //
+      // A real ride carried this shape. Stint 5 of the "Touring Ujung Genteng"
+      // trip holds a fix pair implying 105.5 km/h against a stored max of 92.8;
+      // the jump gate never fired, because 105 is nowhere near its 220 km/h
+      // ceiling. The position spike is simply still in the track. It is harmless
+      // only for as long as nothing plots it, which is what this pins.
+      const fastestMps = 25.0;
+      final points = track(
+        200,
+        speedAt: (i) => i == 100 ? fastestMps : 10,
+        altAt: (i) => 700 + i.toDouble(),
+      );
+      await t.pumpWidget(
+          host(ElevationSpeedChart(points: points, unit: SpeedUnit.kmh)));
+      await t.pumpAndSettle();
+
+      // Drop elevation so the remaining bar is unambiguously the speed series.
+      await t.tap(find.text('Elevation (m)'));
+      await t.pumpAndSettle();
+
+      final bars =
+          t.widget<LineChart>(find.byType(LineChart)).data.lineBarsData;
+      expect(bars, hasLength(1));
+      final peak = bars.single.spots
+          .map((s) => s.y)
+          .reduce((a, b) => a > b ? a : b);
+      // 200 points is under kChartMaxPoints, so nothing thinned the spike away.
+      expect(peak, closeTo(fastestMps * 3.6, 0.5),
+          reason: 'the chart plotted a position-derived speed, not speedMps');
+    });
+
     testWidgets('a flat track drops the tab rather than drawing noise',
         (t) async {
       useDeviceSurface(t);

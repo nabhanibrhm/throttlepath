@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
@@ -10,11 +11,14 @@ import '../core/track_runs.dart';
 import '../core/units.dart';
 import '../data/models/ride.dart';
 import '../data/models/track_point.dart';
+import '../services/share_basemap.dart';
 
 /// The shareable card layouts the rider can pick between before exporting.
 ///
-/// All render on a fully transparent canvas (no background panel or map tiles) so
-/// the sticker drops cleanly onto a photo/video or saves as a transparent PNG.
+/// All render on a fully transparent canvas (no background panel) so the sticker
+/// drops cleanly onto a photo/video or saves as a transparent PNG. The one thing
+/// that can be opaque is the optional basemap panel — see [ShareCard.basemap] —
+/// and only inside the box the route already had.
 ///
 /// **The minimal-look spec assumed an opaque `#0E0E0F` card at 1080×1350.** The
 /// background is still wrong about this app — the canvas is transparent by
@@ -61,12 +65,13 @@ enum ShareLayout {
 /// A shareable ride card, rendered off-screen into a square PNG at [canvasSize]
 /// (see `captureWidgetToPng`).
 ///
-/// Styled after Strava's share sticker: a fully transparent canvas with the
-/// route line and stats floating directly on it (no map tiles — ThrottlePath is
-/// offline-first, so the route is a vector polyline — and no background panel,
-/// so nothing blocks a photo/video placed behind it), in ThrottlePath's amber
-/// brand palette. Every piece of text carries a dark drop shadow (in place of a
-/// solid panel) so it stays legible over whatever ends up behind it.
+/// Styled after Strava's share sticker: the route line and stats floating on a
+/// square canvas, in ThrottlePath's amber brand palette. The route is a vector
+/// polyline by default — being offline-first, the card has to be able to draw a
+/// ride with no tiles at all — over an optional [basemap] panel when the rider
+/// asks for one and the tiles can be had. No text on it carries
+/// a drop shadow; legibility over a photo is [scrim]'s job, and doing both at once
+/// only thickens small type.
 ///
 /// It's deliberately independent of the app's light/dark theme: the shared image
 /// always uses the dark amber brand look so it reads the same for everyone.
@@ -79,6 +84,8 @@ class ShareCard extends StatelessWidget {
     required this.unit,
     this.layout = ShareLayout.split,
     this.stintStarts = const [],
+    this.scrim = true,
+    this.basemap,
   });
 
   final Ride ride;
@@ -86,12 +93,35 @@ class ShareCard extends StatelessWidget {
   final SpeedUnit unit;
   final ShareLayout layout;
 
+  /// Whether to lay a semi-transparent dark wash over the whole square behind the
+  /// content — see [_scrimColor].
+  ///
+  /// On by default because that is the case the card cannot control: a sticker
+  /// dropped onto someone's photo has no idea what is behind it, and white-on-white
+  /// is the one outcome with no recovery. Off gives the original fully transparent
+  /// sticker, which looks better over a dark or quiet image and is the rider's call
+  /// to make per share.
+  final bool scrim;
+
   /// Indices into [points] where each stint (after the first) begins — set when
   /// this card renders a whole multi-stint trip so the route draws each stint as a
   /// separate polyline instead of one line with false join connectors. All of them
   /// paint in the brand amber; the card does not colour-code its stints the way
   /// the Trip screen does. Empty for a single ride.
   final List<int> stintStarts;
+
+  /// Real map tiles under the route, or null for the transparent sticker.
+  ///
+  /// Loaded by the composer rather than the card (see [ShareBasemapLoader]),
+  /// because tiles arrive over seconds and this widget has to be able to paint
+  /// in one frame — the export gives it two. Null is not a failure state: an area
+  /// the rider has never loaded and no signal to fetch it lands here as null and
+  /// the card renders exactly as it did before basemaps existed.
+  final ShareBasemap? basemap;
+
+  /// Whether this layout has a route box for a basemap to sit in. Trace is the
+  /// one card with no map — it is the card for a ride whose positions went bad.
+  bool get _hasMap => layout != ShareLayout.trace;
 
   /// Bundled brand mark — clean amber speedometer on transparent. Precached
   /// before capture (the render only waits a couple of frames).
@@ -121,11 +151,63 @@ class ShareCard extends StatelessWidget {
   /// same row from the start.
   static const _muted = Color(0xFF8A8A8A);
 
-  /// Stands in for a background panel: keeps text readable over an arbitrary
-  /// photo/video the rider places behind this transparent sticker.
-  static const _textShadow = [
-    Shadow(color: Color(0xE6000000), blurRadius: 10, offset: Offset(0, 2)),
-  ];
+  /// The optional backdrop, laid behind everything — see [scrim].
+  ///
+  /// This is the "background panel" the card deliberately does without, as a
+  /// *scrim* rather than a panel: enough to carry white and amber type over an
+  /// arbitrary photo, sheer enough that the photo still reads through it.
+  /// Per-glyph drop shadows used to do this job and did it worse — they thicken
+  /// small type, muddy the amber, and could never help the route line, which had
+  /// nothing behind it either.
+  ///
+  /// 40% black. It started at 60% and read as a grey box on the phone; the point
+  /// is a wash, not a panel, and the feather below buys back some of the contrast
+  /// by keeping the middle honest while the edges give way.
+  static const Color _scrimColor = Color(0x66000000);
+
+  /// How far the scrim is held back from each edge before it is blurred.
+  ///
+  /// With [_scrimFeather], this is what stops the sticker showing a hard square
+  /// outline against a photo.
+  ///
+  /// Both numbers are pinned between two constraints, and the first attempt (26/14)
+  /// missed the second one badly enough to be visible only in a render: the fade
+  /// must reach ~0 by the canvas edge, *and* be over by [_pad], because that is
+  /// where the content starts. At 26/14 the wash was not solid until ~40dp in, so
+  /// the stat column and the wordmark sat in the gradient and disappeared against a
+  /// pale photo — a scrim that fails exactly the case it exists for.
+  ///
+  /// At 10/5 the fade spans roughly 0-25dp: ~2% of the wash at the very edge (a
+  /// 2-sigma tail, invisible), ~95% by the 18dp mark where the type begins.
+  static const double _scrimInset = 10;
+
+  /// Gaussian sigma for the scrim's edge.
+  ///
+  /// A radial gradient was the obvious alternative and cannot do this job: to
+  /// reach the corners it needs a radius of at least 0.707, which leaves the edge
+  /// *midpoints* at 0.7 of the way out and still most of the way opaque. Covering
+  /// the corners and fading out at the edges are mutually exclusive for one radial
+  /// on a square. A blurred rect softens all four sides evenly instead.
+  static const double _scrimFeather = 5;
+
+  /// Corner radius on the scrim rect, before it is blurred.
+  ///
+  /// The feather can only ever be about 20dp wide — it has to be spent by [_pad],
+  /// where the content starts, and reach nothing by the canvas edge, or the
+  /// leftover alpha is clipped into the hard line the feather exists to remove. A
+  /// 20dp fade still leaves an unmistakably *square* wash, because what reads as a
+  /// square is the corners rather than the sharpness of the sides. Rounding them
+  /// off does more for that than any amount of extra blur, and costs only the four
+  /// corners of coverage — where this card puts nothing.
+  static const double _scrimRadius = 46;
+  /// How much of its allotted box the route line actually fills.
+  ///
+  /// The route is the card's backdrop and the numbers are its subject, so it gets
+  /// drawn at a fraction of whatever an `Expanded` hands it. Proportional rather
+  /// than a fixed inset: the layouts give it boxes of very different shapes, and a
+  /// fixed inset would take a third of the Split card's narrow column while barely
+  /// touching the Stacked card's wide one.
+  static const double _routeScale = 0.8;
 
   /// Inset from the sticker's edge, applied to the whole card.
   ///
@@ -149,15 +231,39 @@ class ShareCard extends StatelessWidget {
       style: const TextStyle(
         fontFamily: 'Inter',
         color: _ink,
-        shadows: _textShadow,
       ),
       child: SizedBox.fromSize(
         size: canvasSize,
-        // Full-frame, not centred. Every layout used to float a min-height column
-        // in the middle of the canvas, which is why the wordmark appeared to hover
-        // mid-card (spec 9.1) — it was simply the last item in a short column. The
-        // layouts now fill the height and anchor their own feet.
-        child: Padding(padding: const EdgeInsets.all(_pad), child: content),
+        // The scrim sits *outside* the padding so it reaches all four edges of the
+        // exported square. Inside it, and the sticker would carry an 18dp
+        // transparent frame around a dark middle — which reads as a mistake rather
+        // than a design.
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (scrim)
+              ImageFiltered(
+                imageFilter: ImageFilter.blur(
+                    sigmaX: _scrimFeather, sigmaY: _scrimFeather),
+                child: const Padding(
+                  padding: EdgeInsets.all(_scrimInset),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: _scrimColor,
+                      borderRadius:
+                          BorderRadius.all(Radius.circular(_scrimRadius)),
+                    ),
+                  ),
+                ),
+              ),
+            // Full-frame, not centred. Every layout used to float a min-height
+            // column in the middle of the canvas, which is why the wordmark
+            // appeared to hover mid-card (spec 9.1) — it was simply the last item
+            // in a short column. The layouts now fill the height and anchor their
+            // own feet.
+            Padding(padding: const EdgeInsets.all(_pad), child: content),
+          ],
+        ),
       ),
     );
   }
@@ -169,18 +275,28 @@ class ShareCard extends StatelessWidget {
       children: [
         Expanded(
           child: Row(
+            // Both vertically centred (the Row's default). Top-aligning them was
+            // tried and reverted: it left the whole bottom third of the square
+            // empty under a short stat column, which reads as a mistake rather
+            // than as breathing room.
             children: [
-              // Route takes the full height of the frame rather than sitting in a
-              // 210dp box floated mid-card.
-              Expanded(child: _route()),
-              const SizedBox(width: 14),
+              // A bounded box rather than an `Expanded`. While the route took every
+              // spare dp, the stat column was pinned against the card's right edge
+              // and the gap between the two was whatever the route's own shape did
+              // not fill — on a north-south ride, most of the card.
+              SizedBox(width: 140, child: _route()),
+              const SizedBox(width: 10),
               SizedBox(
-                width: 104,
+                width: 150,
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  mainAxisAlignment: MainAxisAlignment.end,
+                  // Left, not right. Right-aligning pushed every value as far from
+                  // the route as the column was wide, which is what read as "plenty
+                  // of space" between them.
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  // Intrinsic height so the Row can centre the block as a unit.
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    _hero(_distance, _dLabel, size: 30, align: TextAlign.right),
+                    _hero(_distance, _dLabel, size: 34),
                     const SizedBox(height: 12),
                     _rule(),
                     const SizedBox(height: 12),
@@ -201,10 +317,19 @@ class ShareCard extends StatelessWidget {
                   ],
                 ),
               ),
+              // Absorbs whatever the two fixed columns leave, so the pair sits
+              // against the left of the card instead of being spread across it.
+              const Spacer(),
             ],
           ),
         ),
         _wordmark(),
+        // Lifts the signature off the very foot of the square. Split is the one
+        // layout whose content does not reach the bottom — the route and stats are
+        // centred as a block — so a wordmark pinned to the edge sat alone with a
+        // gap above it. The other five fill their height and want it at the foot,
+        // which is why this is here and not in `_wordmark`.
+        const SizedBox(height: 26),
       ],
     );
   }
@@ -219,7 +344,7 @@ class ShareCard extends StatelessWidget {
         Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            _hero(_distance, _dLabel, size: 30),
+            _hero(_distance, _dLabel, size: 34),
             const Spacer(),
             _statBlock('TIME', _totalTime),
             const SizedBox(width: 14),
@@ -237,7 +362,7 @@ class ShareCard extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _hero(_distance, _dLabel, size: 40),
+        _hero(_distance, _dLabel, size: 45),
         const SizedBox(height: 12),
         _rule(),
         const SizedBox(height: 11),
@@ -276,7 +401,7 @@ class ShareCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             // Max speed leads on this card — it is the one the colours are about.
-            _hero(_max, _sLabel, size: 30, label: 'MAX SPEED'),
+            _hero(_max, _sLabel, size: 34, label: 'MAX SPEED'),
             const Spacer(),
             _statBlock('DISTANCE', '$_distance $_dLabel', alignEnd: true),
           ],
@@ -304,11 +429,10 @@ class ShareCard extends StatelessWidget {
               'RIDE LOG',
               style: const TextStyle(
                 color: _amber,
-                fontSize: 9,
+                fontSize: 11,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 2,
-                shadows: _textShadow,
-              ),
+                          ),
             ),
             const Spacer(),
             Text(_stamp, style: _captionStyle),
@@ -367,7 +491,7 @@ class ShareCard extends StatelessWidget {
         Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            _hero(_distance, _dLabel, size: 30),
+            _hero(_distance, _dLabel, size: 34),
             const Spacer(),
             _statBlock('AVG $_sLabel', _avg, alignEnd: true),
           ],
@@ -410,7 +534,7 @@ class ShareCard extends StatelessWidget {
         Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            _hero(_max, _sLabel, size: 34, label: 'PEAK'),
+            _hero(_max, _sLabel, size: 38, label: 'PEAK'),
             const Spacer(),
             _statBlock('DISTANCE', '$_distance $_dLabel', alignEnd: true),
             const SizedBox(width: 14),
@@ -453,28 +577,29 @@ class ShareCard extends StatelessWidget {
   /// that carries it: they are the same words on all six styles, so making them
   /// the brand colour is what makes six layouts read as one app's cards. Size and
   /// weight still do the hierarchy — 8sp w600 under a 30sp w700 hero is in no
-  /// danger of competing with it — and amber is brighter than the old grey, so
-  /// this reads *better* over an arbitrary photo behind the sticker, not worse.
+  /// danger of competing with it.
+  ///
+  /// Unshadowed, unlike the grey and ink text around it: a drop shadow under
+  /// 8sp amber muddies the colour more than it separates it from the backdrop,
+  /// and the brand layer is the one place that should read as flat ink. The
+  /// trade is legibility over a light or busy photo, which is accepted.
   static const _labelStyle = TextStyle(
     color: _amber,
-    fontSize: 8,
+    fontSize: 11,
     fontWeight: FontWeight.w600,
     letterSpacing: 1.05,
-    shadows: _textShadow,
   );
 
   static const _captionStyle = TextStyle(
     color: _muted,
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: FontWeight.w500,
-    shadows: _textShadow,
   );
 
   static const _placeStyle = TextStyle(
     color: _ink,
-    fontSize: 13,
+    fontSize: 16,
     fontWeight: FontWeight.w600,
-    shadows: _textShadow,
   );
 
   /// The route, filling whatever box it is given.
@@ -496,13 +621,27 @@ class ShareCard extends StatelessWidget {
   /// is exactly "take everything offered", said in a parameter the render object
   /// already has. Safe here because every call site sits inside an `Expanded`
   /// bounded by the card's own fixed canvas.
-  Widget _route({bool colorBySpeed = false}) => CustomPaint(
-        size: Size.infinite,
-        painter: _RoutePainter(
-          points,
-          colorBySpeed: colorBySpeed,
-          maxSpeedKmh: ride.maxSpeedKmh,
-          stintStarts: stintStarts,
+  Widget _route({bool colorBySpeed = false}) => FractionallySizedBox(
+        // The route is the card's backdrop, not its subject — the numbers are.
+        // Every layout hands it an `Expanded`, so scaling the type up already took
+        // some of it back; this takes the rest, proportionally rather than by a
+        // fixed inset so a tall box and a wide one shrink by the same amount.
+        //
+        // A basemap opts out. That shrink buys air around a bare line, but the
+        // panel is a defined rectangle that already carries a 12% margin of its
+        // own and is then letterboxed to the ride's shape — taking another fifth
+        // off leaves a stamp adrift in the middle of the card.
+        widthFactor: basemap != null ? 1.0 : _routeScale,
+        heightFactor: basemap != null ? 1.0 : _routeScale,
+        child: CustomPaint(
+          size: Size.infinite,
+          painter: _RoutePainter(
+            points,
+            colorBySpeed: colorBySpeed,
+            maxSpeedKmh: ride.maxSpeedKmh,
+            stintStarts: stintStarts,
+            basemap: basemap,
+          ),
         ),
       );
 
@@ -536,7 +675,6 @@ class ShareCard extends StatelessWidget {
               height: 1,
               fontWeight: FontWeight.w700,
               letterSpacing: size * -0.03,
-              shadows: _textShadow,
             ),
             children: [
               TextSpan(
@@ -544,12 +682,11 @@ class ShareCard extends StatelessWidget {
                 style: const TextStyle(
                   fontFamily: 'Inter',
                   color: _dim,
-                  fontSize: 11,
+                  fontSize: 13,
                   height: 1,
                   fontWeight: FontWeight.w500,
                   letterSpacing: 0,
-                  shadows: _textShadow,
-                ),
+                          ),
               ),
             ],
           ),
@@ -573,11 +710,10 @@ class ShareCard extends StatelessWidget {
           maxLines: 1,
           style: const TextStyle(
             color: Color(0xFFE8E4DC),
-            fontSize: 13,
+            fontSize: 16,
             height: 1.15,
             fontWeight: FontWeight.w600,
-            shadows: _textShadow,
-          ),
+              ),
         ),
       ],
     );
@@ -595,10 +731,9 @@ class ShareCard extends StatelessWidget {
       maxLines: 1,
       style: TextStyle(
         color: amber ? _amber : const Color(0xFFE8E4DC),
-        fontSize: inline ? 11.5 : 13,
+        fontSize: inline ? 14 : 16,
         height: 1.15,
         fontWeight: inline ? FontWeight.w500 : FontWeight.w600,
-        shadows: _textShadow,
       ),
     );
     if (inline) return text;
@@ -674,7 +809,38 @@ class ShareCard extends StatelessWidget {
   /// `MainAxisSize.max` sizes to `constraints.maxWidth`, which is always bounded
   /// here, so this Row is full-width whatever its parent Column's
   /// `crossAxisAlignment` says. No per-layout edits.
+  /// The tile credit, shown only on a card that is actually carrying tiles.
+  ///
+  /// Not optional and not decoration: CARTO and OpenStreetMap both require
+  /// attribution on redistributed imagery, and a share card is redistribution by
+  /// definition. It rides above the wordmark rather than beside it so the
+  /// signature stays the app's own — and so it disappears completely, taking its
+  /// space with it, on the transparent sticker that carries no tiles.
+  Widget _credit() => Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Text(
+          '© OPENSTREETMAP · CARTO',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: _muted.withValues(alpha: 0.85),
+            fontSize: 7,
+            fontWeight: FontWeight.w500,
+            letterSpacing: 0.6,
+          ),
+        ),
+      );
+
   Widget _wordmark() {
+    if (basemap != null && _hasMap) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [_credit(), _wordmarkRow()],
+      );
+    }
+    return _wordmarkRow();
+  }
+
+  Widget _wordmarkRow() {
     return Padding(
       padding: const EdgeInsets.only(top: 10),
       child: Row(
@@ -694,11 +860,10 @@ class ShareCard extends StatelessWidget {
               // already amber, so the signature had been half one colour and half
               // another the whole time.
               color: _amber,
-              fontSize: 9,
+              fontSize: 11,
               fontWeight: FontWeight.w700,
               letterSpacing: 2,
-              shadows: _textShadow,
-            ),
+                      ),
           ),
         ],
       ),
@@ -716,11 +881,20 @@ class _RoutePainter extends CustomPainter {
     this.colorBySpeed = false,
     this.maxSpeedKmh = 0,
     this.stintStarts = const [],
+    this.basemap,
   });
 
   final List<TrackPoint> points;
   final bool colorBySpeed;
   final double maxSpeedKmh;
+
+  /// Real map tiles to draw the route on top of, or null for the transparent
+  /// sticker this card has always been.
+  ///
+  /// Resolved before the card is built (see [ShareBasemapLoader]) precisely so
+  /// this stays a synchronous painter: the export waits two frames and then
+  /// rasterises, which no tile fetch can meet.
+  final ShareBasemap? basemap;
 
   /// Indices where each stint (after the first) begins; empty for a single ride.
   ///
@@ -739,17 +913,137 @@ class _RoutePainter extends CustomPainter {
   static const _red = Color(0xFFEF4444);
   static const _dim = Color(0xFFD8D8D8);
 
+  /// Route stroke weights, in card-logical dp. Everything here is tripled in
+  /// the 1080 export, which is why they read thinner on screen than they paint.
+  ///
+  /// Thinned from 3.5/8/4 and a radius-6 dot. The route is the backdrop of the
+  /// card and the numbers are its subject; at the old weights a 13km ride came
+  /// out as a 10px-wide amber rope on the export, which competed with the hero
+  /// for the first glance and buried the shape of the ride inside its own line.
+  static const double _lineWidth = 2.4;
+  static const double _glowWidth = 6;
+  static const double _glowBlur = 5;
+
+  /// The speed-coloured route carries no glow, so it stays a shade heavier than
+  /// [_lineWidth] — the colour ramp is the point of that card and needs the
+  /// pixels to be read as a ramp rather than as a stipple.
+  static const double _speedLineWidth = 2.8;
+
+  /// Start / end / turnaround markers, and the dark ring that lifts them off
+  /// whatever the line is doing underneath.
+  static const double _dotRadius = 4.5;
+  static const double _dotRing = 1.8;
+
+  /// Laid over the basemap tiles, under the route.
+  static const Color _mapWash = Color(0x40000000);
+
   @override
   void paint(Canvas canvas, Size size) {
     if (points.length < 2) {
       if (points.length == 1) {
         canvas.drawCircle(
-            size.center(Offset.zero), 4, Paint()..color = _amber);
+            size.center(Offset.zero), 3, Paint()..color = _amber);
       }
       return;
     }
 
-    // Project lat/lon to a local metric-ish plane (equirectangular).
+    // Where each fix lands on the canvas. Which projection is used is not a
+    // preference: with a basemap the line has to sit on the roads it was ridden
+    // on, so it must be placed by the tiles' own Web Mercator maths and nothing
+    // else. Without one there is nothing to align to, and the older fit is kept
+    // untouched so every card that shipped before this feature draws as it did.
+    final mapped = basemap != null
+        ? _projectOnBasemap(canvas, size, basemap!)
+        : _projectFitted(size);
+
+    // One contiguous range per stretch of continuous recording. Segments never
+    // bridge a stint boundary or a GPS blackout, so neither draws a false
+    // straight connector.
+    final ranges = _ranges(points.length);
+
+    if (colorBySpeed) {
+      _paintSpeedColored(canvas, mapped, ranges);
+    } else {
+      _paintStints(canvas, mapped, ranges);
+    }
+
+    // Turnaround dots at each *stint* join, then the start (amber) and end (red)
+    // dots on top. Deliberately not drawn at a blackout break: the dot means "the
+    // rider stopped here and set off again", and a dead zone is the opposite
+    // claim — nobody stopped, the receiver did. Marking both the same way would
+    // turn a lost signal into a place the ride visits.
+    final joins = stintStarts.toSet();
+    for (var r = 0; r < ranges.length - 1; r++) {
+      if (!joins.contains(ranges[r].$2)) continue;
+      final end = ranges[r].$2 - 1;
+      if (end >= 0 && end < mapped.length) _dot(canvas, mapped[end], _dim);
+    }
+    _dot(canvas, mapped.first, _amber);
+    _dot(canvas, mapped.last, _red);
+  }
+
+  /// Draws the basemap panel and returns the route placed on it.
+  ///
+  /// Everything here lives in the tiles' world-pixel space, mapped to the canvas
+  /// by one scale and one translate — so a fix and the tile under it cannot
+  /// disagree about where they are.
+  List<Offset> _projectOnBasemap(Canvas canvas, Size size, ShareBasemap map) {
+    final panel = _panelFor(map.crop, size);
+    final k = panel.width / map.crop.width;
+    Offset place(Offset world) => (world - map.crop.topLeft) * k + panel.topLeft;
+
+    canvas.save();
+    canvas.clipRect(panel);
+    final tilePaint = Paint()..filterQuality = FilterQuality.medium;
+    for (final tile in map.tiles) {
+      canvas.drawImageRect(
+        tile.image,
+        Rect.fromLTWH(
+            0, 0, tile.image.width.toDouble(), tile.image.height.toDouble()),
+        Rect.fromPoints(
+            place(tile.world.topLeft), place(tile.world.bottomRight)),
+        tilePaint,
+      );
+    }
+    // Hold the basemap back a stop so the route stays the brightest thing in the
+    // panel. The dark basemap is quiet already, but a city centre is a lot of
+    // white label text and the amber line has to win against it.
+    canvas.drawRect(panel, Paint()..color = _mapWash);
+    canvas.restore();
+
+    // A hairline edge. The panel is the one opaque thing on an otherwise
+    // transparent sticker, and dropped onto a dark photo without an edge it does
+    // not read as a map — it reads as part of the photo having gone wrong.
+    canvas.drawRect(
+      panel.deflate(0.5),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1
+        ..color = _dim.withValues(alpha: 0.28),
+    );
+
+    return [
+      for (final p in points) place(map.worldOf(p.latitude, p.longitude)),
+    ];
+  }
+
+  /// The map panel: the crop's own shape, letterboxed into the space the layout
+  /// gave the route.
+  ///
+  /// This is "crop to the ride" — the panel takes the *ride's* aspect ratio, not
+  /// the box's, so a north-south commute renders as a tall map with margin either
+  /// side rather than a wide one mostly showing the neighbours. The crop already
+  /// carries its own 12% margin, which is why nothing here adds [_pad] on top.
+  static Rect _panelFor(Rect crop, Size size) {
+    final k = math.min(size.width / crop.width, size.height / crop.height);
+    final w = crop.width * k;
+    final h = crop.height * k;
+    return Rect.fromLTWH((size.width - w) / 2, (size.height - h) / 2, w, h);
+  }
+
+  /// The mapless fit: lat/lon onto a local equirectangular plane, scaled to the
+  /// box. Unchanged from before basemaps existed.
+  List<Offset> _projectFitted(Size size) {
     final midLat =
         points.map((p) => p.latitude).reduce((a, b) => a + b) / points.length;
     final kx = math.cos(midLat * math.pi / 180.0);
@@ -789,32 +1083,7 @@ class _RoutePainter extends CustomPainter {
           offsetY + (o.dy - minY) * safeScale,
         );
 
-    final mapped = [for (final o in proj) map(o)];
-
-    // One contiguous range per stretch of continuous recording. Segments never
-    // bridge a stint boundary or a GPS blackout, so neither draws a false
-    // straight connector.
-    final ranges = _ranges(points.length);
-
-    if (colorBySpeed) {
-      _paintSpeedColored(canvas, mapped, ranges);
-    } else {
-      _paintStints(canvas, mapped, ranges);
-    }
-
-    // Turnaround dots at each *stint* join, then the start (amber) and end (red)
-    // dots on top. Deliberately not drawn at a blackout break: the dot means "the
-    // rider stopped here and set off again", and a dead zone is the opposite
-    // claim — nobody stopped, the receiver did. Marking both the same way would
-    // turn a lost signal into a place the ride visits.
-    final joins = stintStarts.toSet();
-    for (var r = 0; r < ranges.length - 1; r++) {
-      if (!joins.contains(ranges[r].$2)) continue;
-      final end = ranges[r].$2 - 1;
-      if (end >= 0 && end < mapped.length) _dot(canvas, mapped[end], _dim);
-    }
-    _dot(canvas, mapped.first, _amber);
-    _dot(canvas, mapped.last, _red);
+    return [for (final o in proj) map(o)];
   }
 
   /// Contiguous `[start, end)` index ranges, one per unbroken stretch of
@@ -865,17 +1134,17 @@ class _RoutePainter extends CustomPainter {
         Paint()
           ..color = _amber.withValues(alpha: 0.25)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 8
+          ..strokeWidth = _glowWidth
           ..strokeCap = StrokeCap.round
           ..strokeJoin = StrokeJoin.round
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, _glowBlur),
       );
       canvas.drawPath(
         path,
         Paint()
           ..color = _amber
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 3.5
+          ..strokeWidth = _lineWidth
           ..strokeCap = StrokeCap.round
           ..strokeJoin = StrokeJoin.round,
       );
@@ -887,7 +1156,7 @@ class _RoutePainter extends CustomPainter {
     final maxS = maxSpeedKmh <= 0 ? 1.0 : maxSpeedKmh;
     final base = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 4
+      ..strokeWidth = _speedLineWidth
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round;
     for (final (start, end) in ranges) {
@@ -900,14 +1169,14 @@ class _RoutePainter extends CustomPainter {
   }
 
   void _dot(Canvas canvas, Offset c, Color color) {
-    canvas.drawCircle(c, 6, Paint()..color = color);
+    canvas.drawCircle(c, _dotRadius, Paint()..color = color);
     canvas.drawCircle(
         c,
-        6,
+        _dotRadius,
         Paint()
           ..color = const Color(0xFF0A0A0A)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 2.5);
+          ..strokeWidth = _dotRing);
   }
 
   @override
@@ -915,6 +1184,7 @@ class _RoutePainter extends CustomPainter {
       oldDelegate.points != points ||
       oldDelegate.colorBySpeed != colorBySpeed ||
       oldDelegate.maxSpeedKmh != maxSpeedKmh ||
+      oldDelegate.basemap != basemap ||
       !listEquals(oldDelegate.stintStarts, stintStarts);
 }
 

@@ -243,9 +243,9 @@ class _RelabelPlacesTileState extends ConsumerState<_RelabelPlacesTile> {
       _done = 0;
       _total = 0;
     });
-    var updated = 0;
+    RelabelOutcome outcome = (updated: 0, failed: 0, busy: false);
     try {
-      updated = await GeocodeBackfill.instance.relabelAll(
+      outcome = await GeocodeBackfill.instance.relabelAll(
         onProgress: (done, total) {
           if (!mounted) return;
           setState(() {
@@ -263,12 +263,28 @@ class _RelabelPlacesTileState extends ConsumerState<_RelabelPlacesTile> {
     ref.invalidate(finishedTripsProvider);
     ref.invalidate(openTripsProvider);
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(updated == 0
-            ? 'Place names are already up to date.'
-            : 'Updated place names on $updated ride${updated == 1 ? '' : 's'}.'),
-      ),
+      SnackBar(content: Text(_relabelMessage(outcome))),
     );
+  }
+
+  /// What to say about a finished pass.
+  ///
+  /// A pass that reached nothing must not read like a pass that found nothing to
+  /// do. Those were the same message until a relabel silently failed 164 lookups
+  /// in a row and reported "already up to date" both times, which is how the
+  /// broken geocoder went unnoticed. Failures lead, because they are the only
+  /// outcome the rider can act on.
+  static String _relabelMessage(RelabelOutcome outcome) {
+    if (outcome.busy) return 'Already refreshing place names.';
+    final n = outcome.updated;
+    final done = n == 0
+        ? 'No place names changed.'
+        : 'Updated place names on $n ride${n == 1 ? '' : 's'}.';
+    if (outcome.failed > 0) {
+      return "Couldn't reach the geocoder for ${outcome.failed} "
+          'lookup${outcome.failed == 1 ? '' : 's'} — check your connection. $done';
+    }
+    return n == 0 ? 'Place names are already up to date.' : done;
   }
 
   @override

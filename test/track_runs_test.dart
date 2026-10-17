@@ -352,4 +352,111 @@ void main() {
       expect(seg.discardedCount, 40, reason: 'inside the budget');
     });
   });
+
+  group('darkEnds', () {
+    // The three real cases from the "Touring Ujung Genteng" trip.
+    final track = leg(0, 60, homeLat, homeLon); // fixes at t+0s .. t+59s
+
+    test('a ride whose fixes bracket it cleanly reports nothing', () {
+      final dark = darkEnds(
+        track,
+        fixOf: fixOf,
+        startedAt: _epoch,
+        endedAt: _epoch.add(const Duration(seconds: 59)),
+      );
+      expect(dark.head, Duration.zero);
+      expect(dark.tail, Duration.zero);
+    });
+
+    test('a dark head is the wait for the first fix (stint 10: 6m19s)', () {
+      final dark = darkEnds(
+        track,
+        fixOf: fixOf,
+        startedAt: _epoch.subtract(const Duration(minutes: 6, seconds: 19)),
+        endedAt: _epoch.add(const Duration(seconds: 59)),
+      );
+      expect(dark.head, const Duration(minutes: 6, seconds: 19));
+      expect(dark.tail, Duration.zero);
+    });
+
+    test('a dark tail is recording on past the last fix (stint 4: 1h14m)', () {
+      final dark = darkEnds(
+        track,
+        fixOf: fixOf,
+        startedAt: _epoch,
+        endedAt: _epoch.add(const Duration(seconds: 59, minutes: 74, hours: 0)),
+      );
+      expect(dark.head, Duration.zero);
+      expect(dark.tail, const Duration(minutes: 74));
+    });
+
+    test('an end time a second before the last fix is not negative dark time',
+        () {
+      // Real rows do this — 6 of the 10 stints stored an end time 1-2 s ahead of
+      // their final fix. Reporting "-0h00m02s of no GPS" would be nonsense.
+      final dark = darkEnds(
+        track,
+        fixOf: fixOf,
+        startedAt: _epoch,
+        endedAt: _epoch.add(const Duration(seconds: 57)),
+      );
+      expect(dark.tail, Duration.zero);
+    });
+
+    test('an empty track and an unfinished ride report nothing', () {
+      expect(darkEnds(<Fix>[], fixOf: fixOf, startedAt: _epoch).head,
+          Duration.zero);
+      // No end time yet — a ride still in progress has no tail to speak of.
+      expect(darkEnds(track, fixOf: fixOf, startedAt: _epoch).tail,
+          Duration.zero);
+    });
+  });
+
+  group('the gap the odometer must agree with', () {
+    // Stint 1 of the "Touring Ujung Genteng" trip in miniature: a 26 s hole
+    // between two fix *timestamps*, bridging ~430 m at an implied 59 km/h. Short
+    // enough to look like ordinary riding, long enough to be a blackout.
+    //
+    // The engine decides a blackout from when a fix *arrived*; the track stores
+    // the fix's own time and every consumer here segments on that. On the real
+    // ride the two disagreed, the odometer counted the bridge and this module cut
+    // it, and the stored total finished 2.03 km (0.43%) ahead of everything
+    // re-derived from the same points. The engine now applies the rule below to
+    // `fix.timestamp` as well, so what it refuses to count and what this module
+    // refuses to draw are the same segments.
+    // Each 20-fix leg covers 19 * 0.00005 deg ≈ 106 m, so the pair is ~212 m of
+    // genuinely ridden track. The second leg restarts 0.004777 deg north of the
+    // first's *end*, i.e. ~426 m further on — which is what 26 s at 59 km/h looks
+    // like, the real bridge from stint 1. Bridged, the track totals ~638 m.
+    List<Fix> withHole(int holeSeconds) => [
+          ...leg(0, 20, homeLat, homeLon),
+          ...leg(19 + holeSeconds, 20, homeLat + 0.00095 + 0.004777, homeLon),
+        ];
+
+    test('a 26 s hole is a blackout, and the bridge is not distance', () {
+      final track = withHole(26);
+      expect(splitIntoRuns(track, fixOf: fixOf), hasLength(2),
+          reason: 'the read path must see two runs');
+
+      // What the chart's distance axis shows: frozen across the hole.
+      final cumulative = cumulativeMeters(track, fixOf: fixOf);
+      final firstRun = cumulativeMeters(track.take(20).toList(), fixOf: fixOf);
+      final secondRun = cumulativeMeters(track.skip(20).toList(), fixOf: fixOf);
+      expect(cumulative.last, closeTo(firstRun.last + secondRun.last, 0.5),
+          reason: 'the 426 m bridge leaked into the distance axis');
+      // And the bridge really was worth excluding — otherwise this test would
+      // pass on a track where there was nothing to exclude in the first place.
+      expect(cumulative.last, lessThan(300),
+          reason: 'the two legs alone are ~212 m; a bridged total would be ~638');
+    });
+
+    test('the threshold is exact — one second under is ordinary riding', () {
+      final under = withHole(kSignalLossSeconds - 1);
+      expect(splitIntoRuns(under, fixOf: fixOf), hasLength(1),
+          reason: 'an 11 s gap is degraded reception, not a blackout');
+      // Under the threshold the straight line *is* counted, by both paths.
+      expect(cumulativeMeters(under, fixOf: fixOf).last, greaterThan(600),
+          reason: 'the bridge should be included below the threshold');
+    });
+  });
 }

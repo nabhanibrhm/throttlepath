@@ -1,0 +1,17 @@
+{
+    // Debug runs include the CARTO basemap key from the git-ignored secrets.json.
+    // Without it CARTO serves a watermark tile on every map.
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "ThrottlePath (debug)",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "debug",
+            "program": "lib/main.dart",
+            "toolArgs": [
+                "--dart-define-from-file=secrets.json"
+            ]
+        }
+    ]
+}

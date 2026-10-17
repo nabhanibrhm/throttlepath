@@ -73,6 +73,7 @@ Widget host(
   Ride ride,
   List<TrackPoint> points, {
   List<int> stintStarts = const [],
+  bool scrim = true,
 }) =>
     MaterialApp(
       theme: buildDarkTheme(),
@@ -84,6 +85,7 @@ Widget host(
             unit: SpeedUnit.kmh,
             layout: layout,
             stintStarts: stintStarts,
+            scrim: scrim,
           ),
         ),
       ),
@@ -159,6 +161,35 @@ List<TrackPoint> blackoutTrack() {
   return out;
 }
 
+/// Every run of text the card actually hands to the engine, as
+/// (colour, shadows) — read off the *resolved* spans, not the source styles.
+///
+/// This has to come from each `Text`'s own resolved span. `Text` merges
+/// `DefaultTextStyle` itself when it builds its `RichText`, so if that ancestor
+/// ever carries a shadow again, a style merely omitting `shadows:` inherits it
+/// and looks untouched. Resolving `DefaultTextStyle.of()` from the card's context
+/// instead would report the ancestor's value for every line and pass whatever the
+/// styles happened to say — a test that cannot fail for the reason it was
+/// written.
+List<({int color, List<Shadow> shadows})> textRuns(WidgetTester t) {
+  final out = <({int color, List<Shadow> shadows})>[];
+  void walk(InlineSpan span) {
+    if (span is! TextSpan) return;
+    final color = span.style?.color;
+    if (color != null && (span.text?.isNotEmpty ?? false)) {
+      out.add((color: color.toARGB32(), shadows: span.style?.shadows ?? const []));
+    }
+    for (final child in span.children ?? const <InlineSpan>[]) {
+      walk(child);
+    }
+  }
+
+  for (final rich in t.widgetList<RichText>(find.byType(RichText))) {
+    walk(rich.text);
+  }
+  return out;
+}
+
 void main() {
   setUpAll(loadInter);
 
@@ -219,9 +250,11 @@ void main() {
     // amber for that reason rather than as decoration. Asserted because a grey
     // caption is exactly the kind of thing a later pass "restores" for contrast.
     //
-    // Everything at 9sp or under: the stat labels, the Trace/Speed-map headers,
+    // Everything at 11sp or under: the stat labels, the Trace/Speed-map headers,
     // the colour-scale ends, `RIDE LOG` and the wordmark. Deliberately *not* the
-    // 10sp timestamp, which stays grey as provenance rather than a stat.
+    // 12sp timestamp, which stays grey as provenance rather than a stat. The
+    // threshold tracks `_labelStyle`; it moved 9 -> 11 when the card's type was
+    // scaled up, and the grey timestamp moved with it to stay just above.
     const amber = Color(0xFFFFB22C);
     for (final layout in ShareLayout.values) {
       await t.pumpWidget(host(layout, makeRide(), track()));
@@ -229,7 +262,7 @@ void main() {
       var captions = 0;
       for (final text in t.widgetList<Text>(find.byType(Text))) {
         final size = text.style?.fontSize;
-        if (size == null || size > 9) continue;
+        if (size == null || size > 11) continue;
         captions++;
         expect(text.style?.color, amber,
             reason: '${layout.title} writes "${text.data}" in '
@@ -528,13 +561,15 @@ void main() {
     // for a second by someone who wasn't on the ride, so the palette only said
     // "this is several things" about a card whose whole claim is one ride.
     //
-    // The route line, not the glow (alpha 0.25) and not the dots — those are
-    // start/end/turnaround markers and are meant to differ.
+    // The line is told apart from the glow by the glow having a mask filter,
+    // not by its stroke width: pinning the number here made a test named after
+    // the stint palette fail when the route was thinned, which reports the
+    // wrong thing about the wrong change.
     List<Color> routeLines() => [
           for (final (method, args) in paintCalls(fillPainters()))
             if (method == #drawPath &&
                 (args[1] as Paint).style == PaintingStyle.stroke &&
-                (args[1] as Paint).strokeWidth == 3.5)
+                (args[1] as Paint).maskFilter == null)
               (args[1] as Paint).color,
         ];
 
@@ -553,6 +588,31 @@ void main() {
     expect(trip, hasLength(3), reason: 'the stints stopped being segmented');
     expect(trip.toSet(), plain.toSet(),
         reason: 'the stints are colour-coded again: $trip');
+  });
+
+  testWidgets('no text carries a drop shadow, in either backdrop', (t) async {
+    // Legibility over an arbitrary photo is the scrim's job now. Glyph shadows
+    // used to do it and did it worse — they thicken 11sp type, muddy the amber,
+    // and could never help the route line, which had nothing behind it either.
+    //
+    // Worth pinning because a shadow is easy to reintroduce by accident: the card
+    // wrapped everything in a `DefaultTextStyle`, and while *that* carried one,
+    // any style merely omitting `shadows:` inherited it. Reading the resolved
+    // spans is what catches that; reading the source styles would not.
+    for (final layout in ShareLayout.values) {
+      for (final scrim in const [true, false]) {
+        await t.pumpWidget(host(layout, makeRide(), track(), scrim: scrim));
+        await t.pumpAndSettle();
+
+        final runs = textRuns(t);
+        expect(runs, isNotEmpty, reason: '${layout.title} rendered no text');
+        for (final run in runs) {
+          expect(run.shadows, isEmpty,
+              reason: '${layout.title} (scrim: $scrim) draws '
+                  '0x${run.color.toRadixString(16)} with a shadow');
+        }
+      }
+    }
   });
 
   testWidgets('a single-point track renders every layout', (t) async {

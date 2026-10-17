@@ -46,6 +46,9 @@ app.*.map.json
 
 CLAUDE.md
 
+# API keys (CARTO_KEY) — read by scripts/ via --dart-define-from-file
+/secrets.json
+
 #DB store
 /tool/pulled_db/*
 

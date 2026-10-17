@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:throttlepath/core/units.dart';
 import 'package:throttlepath/data/models/ride.dart';
@@ -64,7 +65,9 @@ Future<void> openSheet(WidgetTester t, Size logical) async {
   t.view.physicalSize = logical;
   addTearDown(t.view.reset);
 
-  await t.pumpWidget(MaterialApp(
+  // The composer reads the remembered backdrop choice, so it needs a scope.
+  await t.pumpWidget(ProviderScope(
+      child: MaterialApp(
     theme: buildDarkTheme(),
     home: Scaffold(
       body: Builder(
@@ -80,7 +83,7 @@ Future<void> openSheet(WidgetTester t, Size logical) async {
         ),
       ),
     ),
-  ));
+  )));
   await t.tap(find.text('open'));
   await t.pumpAndSettle();
 }

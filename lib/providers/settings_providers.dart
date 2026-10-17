@@ -193,6 +193,67 @@ final pipEnabledProvider =
   (ref) => PipEnabledController(),
 );
 
+/// Holds the "export share cards with their dark backdrop" preference.
+///
+/// Self-loading for [PipEnabledController]'s reasons, and with the same shape: it
+/// starts at its real default (`true`) and nothing reads it until the rider opens
+/// the share sheet, long after the read has landed.
+class ShareScrimController extends StateNotifier<bool> {
+  ShareScrimController() : super(true) {
+    _load();
+  }
+
+  Future<void> _load() async {
+    state = await SettingsService.instance.loadShareScrim();
+  }
+
+  Future<void> set(bool enabled) async {
+    if (enabled == state) return;
+    state = enabled;
+    await SettingsService.instance.saveShareScrim(enabled);
+  }
+
+  Future<void> toggle() => set(!state);
+}
+
+/// Whether share cards are exported over a dark backdrop. **On by default** — see
+/// `SettingsService.loadShareScrim`. Lives here rather than as sheet-local state so
+/// the choice is remembered between shares.
+final shareScrimProvider =
+    StateNotifierProvider<ShareScrimController, bool>(
+  (ref) => ShareScrimController(),
+);
+
+/// Holds the "draw share cards over real map tiles" preference.
+///
+/// Same shape as [ShareScrimController], opposite default — see
+/// `SettingsService.loadShareBasemap` for why this one starts off.
+class ShareBasemapController extends StateNotifier<bool> {
+  ShareBasemapController() : super(false) {
+    _load();
+  }
+
+  Future<void> _load() async {
+    state = await SettingsService.instance.loadShareBasemap();
+  }
+
+  Future<void> set(bool enabled) async {
+    if (enabled == state) return;
+    state = enabled;
+    await SettingsService.instance.saveShareBasemap(enabled);
+  }
+
+  Future<void> toggle() => set(!state);
+}
+
+/// Whether share cards draw their route over a map. **Off by default.** Kept out
+/// of the sheet's own state for [shareScrimProvider]'s reason: the rider who
+/// wants maps on their cards wants it on the next one too.
+final shareBasemapProvider =
+    StateNotifierProvider<ShareBasemapController, bool>(
+  (ref) => ShareBasemapController(),
+);
+
 /// Holds the rolling window of GNSS time-to-first-fix samples.
 ///
 /// The one store here that loads itself instead of being seeded from `main()`:

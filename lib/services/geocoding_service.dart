@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:geocoding/geocoding.dart';
 
 /// Best-effort reverse geocoding for ride start/end place names.
@@ -54,6 +55,13 @@ class GeocodingService {
   /// Falls back gracefully: if only one level resolves, that one is returned;
   /// duplicate parts collapse to a single name; a placemark with no useful field
   /// returns `null`.
+  /// [_label] under test. The formatting is the one part of this service that is
+  /// pure — the lookup itself needs the platform Geocoder and a network — and it
+  /// is where the "Sukabumi" / "Sukabumi Regency" split lived, so it is worth
+  /// pinning down without a device.
+  @visibleForTesting
+  static String? labelOf(Placemark p) => _label(p);
+
   static String? _label(Placemark p) {
     final subdistrict = _clean(_firstNonBlank([p.locality, p.subLocality]));
     final city = _clean(_firstNonBlank([p.subAdministrativeArea]));
@@ -76,11 +84,35 @@ class GeocodingService {
     caseSensitive: false,
   );
 
-  /// Strips the admin-type prefix from [name] and trims it; returns `null` if
-  /// nothing meaningful is left.
+  /// Trailing English administrative words, for when the Geocoder answers in
+  /// English instead of Indonesian: "Sukabumi Regency" is the same place as
+  /// "Kabupaten Sukabumi", and only the prefix form was being stripped.
+  ///
+  /// Found on the device: the same spot, geocoded twice three metres apart,
+  /// came back as "Ciracap, Sukabumi Regency" and "Ciracap, Sukabumi" — so a trip
+  /// appeared to change city while the rider stood still. Which form you get is
+  /// not stable, so both have to normalise to the bare name or no amount of
+  /// re-labelling converges.
+  /// Anchored on a word boundary at the front (`^` or whitespace) so it strips
+  /// "Sukabumi Regency" and a field that is nothing but "Regency", while leaving
+  /// a name that merely ends in those letters alone.
+  static final RegExp _adminSuffix = RegExp(
+    r'(?:^|\s+)(regency|municipality|city)$',
+    caseSensitive: false,
+  );
+
+  /// Strips the admin-type prefix and suffix from [name] and trims it; returns
+  /// `null` if nothing meaningful is left.
+  ///
+  /// Suffix after prefix so a doubled-up "Kabupaten Sukabumi Regency" reduces all
+  /// the way, and the emptiness check runs last so a field that was *only* an
+  /// admin word ("Regency") returns null rather than an empty string.
   static String? _clean(String? name) {
     if (name == null) return null;
-    final v = name.replaceFirst(_adminPrefix, '').trim();
+    final v = name
+        .replaceFirst(_adminPrefix, '')
+        .replaceFirst(_adminSuffix, '')
+        .trim();
     return v.isEmpty ? null : v;
   }
 

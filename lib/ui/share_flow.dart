@@ -1,14 +1,19 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../core/units.dart';
 import '../data/models/ride.dart';
 import '../data/models/track_point.dart';
+import '../providers/settings_providers.dart';
 import '../services/gpx_export.dart';
 import '../services/ride_share.dart';
+import '../services/share_basemap.dart';
 import '../theme/app_theme.dart';
 import 'share_card.dart';
+import 'tracking_map_screen.dart' show basemapUrl;
 
 /// Where a finished card (or track) can be sent.
 enum _ShareAction {
@@ -24,16 +29,44 @@ enum _ShareAction {
 /// What the composer sheet hands back: the layout on screen when the rider chose,
 /// and what they chose. `gpx` has no layout — it exports the track, not a card.
 class _ShareRequest {
-  const _ShareRequest.card(this.layout, this.action) : gpx = false;
-  // The layout is unused on this path; it just has to be *a* value.
+  const _ShareRequest.card(this.layout, this.action, this.scrim) : gpx = false;
+  // The layout and backdrop are unused on this path; they just have to be values.
   const _ShareRequest.gpx()
       : layout = ShareLayout.split,
         action = _ShareAction.more,
+        scrim = true,
         gpx = true;
 
   final ShareLayout layout;
   final _ShareAction action;
+
+  /// The backdrop switch as it stood when the rider committed — read from the
+  /// sheet rather than the provider at render time, so a card is exported exactly
+  /// as it was previewed.
+  final bool scrim;
   final bool gpx;
+}
+
+/// Carries the basemap between the sheet and the render that follows it.
+///
+/// The tiles are loaded inside the composer — that is where the toggle and the
+/// preview are — but they are needed again *after* the sheet has popped, by the
+/// export. Passing them out through [_ShareRequest] would leak them whenever the
+/// rider dismisses the sheet instead of sharing; a holder owned by
+/// [showShareFlow] is disposed on every path out.
+class _BasemapHolder {
+  ShareBasemap? value;
+
+  /// The load in flight, if any.
+  ///
+  /// Awaited before the export so a rider who taps Instagram while the tiles are
+  /// still arriving gets the card they asked for rather than a silent fallback.
+  Future<void>? pending;
+
+  void dispose() {
+    value?.dispose();
+    value = null;
+  }
 }
 
 /// Opens the share composer for a ride (or a synthesized combined trip ride) and
@@ -60,85 +93,104 @@ Future<void> showShareFlow(
   String subject = 'ride',
 }) async {
   final cx = AppColors.of(context);
-  final request = await showModalBottomSheet<_ShareRequest>(
-    context: context,
-    backgroundColor: cx.surfaceRaised,
-    isScrollControlled: true,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
-    ),
-    builder: (ctx) => _ShareComposer(
-      ride: ride,
-      points: points,
-      unit: unit,
-      stintStarts: stintStarts,
-      subject: subject,
-    ),
-  );
-  if (request == null || !context.mounted) return;
-
-  onBusyChanged(true);
+  final basemap = _BasemapHolder();
   try {
-    if (request.gpx) {
-      await GpxExport.share(ride: ride, points: points, stintStarts: stintStarts);
-    } else {
-      switch (request.action) {
-        case _ShareAction.instagram:
-          await RideShare.shareToInstagram(
-            context: context,
-            ride: ride,
-            points: points,
-            unit: unit,
-            layout: request.layout,
-            stintStarts: stintStarts,
-          );
-        case _ShareAction.gallery:
-          await RideShare.saveToGallery(
-            context: context,
-            ride: ride,
-            points: points,
-            unit: unit,
-            layout: request.layout,
-            stintStarts: stintStarts,
-          );
-          if (context.mounted) _showMessage(context, 'Saved to your gallery.');
-        case _ShareAction.more:
-          await RideShare.shareToSystem(
-            context: context,
-            ride: ride,
-            points: points,
-            unit: unit,
-            layout: request.layout,
-            stintStarts: stintStarts,
-          );
+    final request = await showModalBottomSheet<_ShareRequest>(
+      context: context,
+      backgroundColor: cx.surfaceRaised,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (ctx) => _ShareComposer(
+        ride: ride,
+        points: points,
+        unit: unit,
+        stintStarts: stintStarts,
+        subject: subject,
+        basemap: basemap,
+      ),
+    );
+    if (request == null || !context.mounted) return;
+
+    // The tiles may still be arriving. Better a share that waits a beat than one
+    // that quietly drops the map the rider switched on and previewed.
+    await basemap.pending;
+    if (!context.mounted) return;
+    final tiles = request.gpx ? null : basemap.value;
+
+    onBusyChanged(true);
+    try {
+      if (request.gpx) {
+        await GpxExport.share(ride: ride, points: points, stintStarts: stintStarts);
+      } else {
+        switch (request.action) {
+          case _ShareAction.instagram:
+            await RideShare.shareToInstagram(
+              context: context,
+              ride: ride,
+              points: points,
+              unit: unit,
+              layout: request.layout,
+              scrim: request.scrim,
+              stintStarts: stintStarts,
+              basemap: tiles,
+            );
+          case _ShareAction.gallery:
+            await RideShare.saveToGallery(
+              context: context,
+              ride: ride,
+              points: points,
+              unit: unit,
+              layout: request.layout,
+              scrim: request.scrim,
+              stintStarts: stintStarts,
+              basemap: tiles,
+            );
+            if (context.mounted) _showMessage(context, 'Saved to your gallery.');
+          case _ShareAction.more:
+            await RideShare.shareToSystem(
+              context: context,
+              ride: ride,
+              points: points,
+              unit: unit,
+              layout: request.layout,
+              scrim: request.scrim,
+              stintStarts: stintStarts,
+              basemap: tiles,
+            );
+        }
       }
-    }
-  } catch (_) {
-    if (context.mounted) {
-      _showMessage(
-        context,
-        request.gpx
-            ? "Couldn't export the track. Try again."
-            : request.action == _ShareAction.gallery
-                ? "Couldn't save the image. Try again."
-                : "Couldn't share this $subject. Try again.",
-        isError: true,
-      );
+    } catch (_) {
+      if (context.mounted) {
+        _showMessage(
+          context,
+          request.gpx
+              ? "Couldn't export the track. Try again."
+              : request.action == _ShareAction.gallery
+                  ? "Couldn't save the image. Try again."
+                  : "Couldn't share this $subject. Try again.",
+          isError: true,
+        );
+      }
+    } finally {
+      onBusyChanged(false);
     }
   } finally {
-    onBusyChanged(false);
+    basemap.dispose();
   }
 }
 
 /// The sheet: a live preview that fills the width it can, a swipeable strip of
 /// layouts, and the destinations.
-class _ShareComposer extends StatefulWidget {
+class _ShareComposer extends ConsumerStatefulWidget {
   const _ShareComposer({
     required this.ride,
     required this.points,
     required this.unit,
     required this.stintStarts,
     required this.subject,
+    required this.basemap,
   });
 
   final Ride ride;
@@ -147,13 +199,24 @@ class _ShareComposer extends StatefulWidget {
   final List<int> stintStarts;
   final String subject;
 
+  /// Owned by [showShareFlow], filled in here — see [_BasemapHolder].
+  final _BasemapHolder basemap;
+
   @override
-  State<_ShareComposer> createState() => _ShareComposerState();
+  ConsumerState<_ShareComposer> createState() => _ShareComposerState();
 }
 
-class _ShareComposerState extends State<_ShareComposer> {
+class _ShareComposerState extends ConsumerState<_ShareComposer> {
   final PageController _pages = PageController();
   int _index = 0;
+
+  /// True while tiles are in flight, so the row can say so instead of the
+  /// preview just sitting there looking like the switch did nothing.
+  bool _loadingMap = false;
+
+  /// Set once a load has come back empty, so flipping the switch on and off does
+  /// not re-run a twelve-second timeout over ground that has no tiles.
+  bool _mapUnavailable = false;
 
   @override
   void dispose() {
@@ -162,6 +225,61 @@ class _ShareComposerState extends State<_ShareComposer> {
   }
 
   ShareLayout get _layout => ShareLayout.values[_index];
+
+  /// Loads the basemap once and keeps it for every layout in the sheet.
+  ///
+  /// The tiles depend on the route, not on which card is on screen, so swiping
+  /// between styles costs nothing. Switching the toggle off keeps them too: the
+  /// rider who is comparing with and without should not pay a refetch each time.
+  void _wantBasemap(bool on) {
+    if (!on || _loadingMap || _mapUnavailable) return;
+    if (widget.basemap.value != null) return;
+    if (widget.points.isEmpty) return;
+
+    setState(() => _loadingMap = true);
+    final future = ShareBasemapLoader.load(
+      route: [
+        for (final p in widget.points) LatLng(p.latitude, p.longitude),
+      ],
+      // The card is always the dark brand look, whatever theme the app is in.
+      urlTemplate: basemapUrl(true),
+    ).then((map) {
+      widget.basemap.value = map;
+      if (mounted) {
+        setState(() {
+          _loadingMap = false;
+          _mapUnavailable = map == null;
+        });
+      }
+    });
+    widget.basemap.pending = future;
+  }
+
+  /// What the settings row says just left of the map switch.
+  ///
+  /// Short by necessity — it shares a row with two switches and two labels on a
+  /// 320dp phone — and empty whenever the preview already answers the question.
+  String _mapHint({required bool mapAllowed, required bool on}) {
+    if (!mapAllowed) return 'Not on this style';
+    if (!on) return '';
+    if (_loadingMap) return 'Loading…';
+    // The silent-fallback decision is about the *card*, not the sheet: the export
+    // never fails, but the rider standing in front of a preview that did not
+    // change deserves to know why.
+    if (_mapUnavailable) return 'No tiles here';
+    return '';
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // The preference is remembered, so a rider who left this on last time opens
+    // the sheet to a card that is already loading rather than to one that only
+    // starts once they touch the switch they already set.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _wantBasemap(ref.read(shareBasemapProvider));
+    });
+  }
 
   void _select(int i) {
     if (i == _index) return;
@@ -177,14 +295,25 @@ class _ShareComposerState extends State<_ShareComposer> {
   Widget build(BuildContext context) {
     final cx = AppColors.of(context);
     final media = MediaQuery.of(context);
+    final scrim = ref.watch(shareScrimProvider);
+    final wantsMap = ref.watch(shareBasemapProvider);
+    // Trace draws no route, so there is nothing for a map to sit under.
+    final mapAllowed = _layout != ShareLayout.trace;
+    final tiles = wantsMap && mapAllowed ? widget.basemap.value : null;
     // A square card wants a square preview: as wide as the sheet's content area
     // (20dp of padding either side) is also as tall as it can usefully be. The
-    // second term is the rest of the sheet — handle, title, chips, blurb,
-    // destinations, GPX row — so on a short screen the preview is what gives way.
-    // Never past 1:1; scaling a 360dp card up only softens it.
+    // second term is the rest of the sheet — handle, title, the settings row,
+    // chips, blurb, destinations, GPX row — so on a short screen the preview
+    // gives way. It went 300 -> 348 when the backdrop switch was added; a switch
+    // carries a 48dp tap target, and leaving the old figure is what makes a sheet
+    // overflow. The map switch cost nothing further only because it shares that
+    // one row — see the settings row below before splitting it in two.
+    // Never past 1:1; scaling a 360dp card up only softens it. The 120dp floor is
+    // for the shortest supported screen, where the chrome alone fills the sheet —
+    // it was 140 until the backdrop row arrived and took the last of the slack.
     final double preview = math
-        .min(media.size.width - 40, media.size.height * 0.9 - 300)
-        .clamp(140, 360)
+        .min(media.size.width - 40, media.size.height * 0.9 - 348)
+        .clamp(120, 360)
         .toDouble();
     return ConstrainedBox(
       // A ceiling now, not a target. While the card was 9:16 the sheet took every
@@ -229,7 +358,76 @@ class _ShareComposerState extends State<_ShareComposer> {
                 ],
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 4),
+            // Above the preview rather than beside the destinations: these change
+            // what you are looking at, so they belong with the thing they change.
+            //
+            // Both on one row, which is not tidiness — it is the only way the map
+            // switch fits. A second switch row costs 48dp, and on the shortest
+            // supported phone the sheet is already within 7dp of its cap with the
+            // preview at its floor; the sheet simply overflowed. The two hint
+            // sentences that used to sit beside "Dark backdrop" paid for it: the
+            // live preview a few dp below answers "what does this do" better than
+            // they did, and the one hint that says something the preview *cannot*
+            // — why a map is missing — is kept.
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Row(
+                children: [
+                  Text(
+                    'Backdrop',
+                    style: TextStyle(
+                      color: cx.textBright,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  Switch(
+                    value: scrim,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    onChanged: (v) =>
+                        ref.read(shareScrimProvider.notifier).set(v),
+                  ),
+                  // Immediately left of the control it is about, and flexible so
+                  // it gives way rather than overflowing a narrow phone.
+                  Expanded(
+                    child: Text(
+                      _mapHint(mapAllowed: mapAllowed, on: wantsMap),
+                      textAlign: TextAlign.right,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: cx.textTertiary, fontSize: kMinFontSize),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Map',
+                    style: TextStyle(
+                      color: mapAllowed ? cx.textBright : cx.textDim,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  Switch(
+                    value: wantsMap && mapAllowed,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    // Disabled on Trace rather than hidden: a control that appears
+                    // and vanishes as the rider swipes styles is worse than one
+                    // that stays put and says why it cannot be used here — and it
+                    // keeps the sheet's height fixed, which the preview maths
+                    // below depends on.
+                    onChanged: mapAllowed
+                        ? (v) {
+                            ref.read(shareBasemapProvider.notifier).set(v);
+                            _wantBasemap(v);
+                          }
+                        : null,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 4),
             SizedBox(
               height: preview,
               child: PageView.builder(
@@ -242,6 +440,9 @@ class _ShareComposerState extends State<_ShareComposer> {
                   unit: widget.unit,
                   stintStarts: widget.stintStarts,
                   layout: ShareLayout.values[i],
+                  scrim: scrim,
+                  basemap:
+                      ShareLayout.values[i] == ShareLayout.trace ? null : tiles,
                 ),
               ),
             ),
@@ -286,7 +487,7 @@ class _ShareComposerState extends State<_ShareComposer> {
                         action: a,
                         primary: a == _ShareAction.instagram,
                         onTap: () => Navigator.of(context)
-                            .pop(_ShareRequest.card(_layout, a)),
+                            .pop(_ShareRequest.card(_layout, a, scrim)),
                       ),
                     ),
                   ],
@@ -340,6 +541,8 @@ class _Preview extends StatelessWidget {
     required this.unit,
     required this.stintStarts,
     required this.layout,
+    required this.scrim,
+    this.basemap,
   });
 
   final Ride ride;
@@ -347,6 +550,8 @@ class _Preview extends StatelessWidget {
   final SpeedUnit unit;
   final List<int> stintStarts;
   final ShareLayout layout;
+  final bool scrim;
+  final ShareBasemap? basemap;
 
   @override
   Widget build(BuildContext context) {
@@ -368,7 +573,9 @@ class _Preview extends StatelessWidget {
               points: points,
               unit: unit,
               layout: layout,
+              scrim: scrim,
               stintStarts: stintStarts,
+              basemap: basemap,
             ),
           ),
         ),

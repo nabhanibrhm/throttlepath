@@ -363,6 +363,23 @@ Future<void> onStart(ServiceInstance service) async {
   double? lastLat;
   double? lastLon;
 
+  // The previous accepted fix's *own* timestamp — the GPS clock, not ours.
+  //
+  // The engine decides a blackout from how long it has been since a fix
+  // *arrived* (`RideClock.secondsSinceLastFix`, wall clock), which is the right
+  // question for "has the receiver gone quiet right now" — that is what freezes
+  // the ride clock and lights the SIGNAL LOST banner. But the track persists
+  // `fix.timestamp`, and every read-path consumer (`core/track_runs.dart`, the
+  // charts, the GPX writer, the share cards) measures its gaps with *that*. Two
+  // clocks, one threshold: sharing `kSignalLossSeconds` cannot keep them
+  // agreeing when they are not measuring the same interval.
+  //
+  // Found on a real 470 km trip: a 26 s gap between fix timestamps bridged 428 m
+  // at an implied 59 km/h, and the odometer counted every metre of it while the
+  // charts and GPX cut it out — the stored total ran 2.03 km (0.43%) ahead of
+  // anything re-derived from the same track.
+  DateTime? lastFixTimestamp;
+
   // Notification is refreshed on a slower cadence than the 1 Hz tick to avoid
   // per-second notification churn. Seeded at the threshold so the first tick
   // posts immediately; lastNotifiedPaused forces a refresh on pause/resume.
@@ -393,6 +410,10 @@ Future<void> onStart(ServiceInstance service) async {
     recentFixes.clear();
     recentHeadings.clear();
     currentLeanDegrees = null;
+    // The GPS-clock anchor goes with them: after a re-anchor there is no previous
+    // fix to measure a gap against, and carrying a stale one would make the next
+    // fix look like it arrived after a blackout that has already been settled.
+    lastFixTimestamp = null;
   }
 
   void emitTelemetry() {
@@ -697,8 +718,36 @@ Future<void> onStart(ServiceInstance service) async {
       // the stale standstill window. Nulling the smoothed anchor makes the
       // distance step below skip this segment — a straight line across a tunnel
       // is phantom, not ridden.
-      if (clock.onFixAccepted(now, displacementSpeedKmh: displacementSpeedKmh)) {
+      // The same gap, measured on the GPS's own clock instead of ours. This is
+      // the interval the *stored track* will show, and therefore the one every
+      // read-path consumer segments on — see [lastFixTimestamp].
+      // Deliberately the *same expression* `splitIntoRuns` uses on the stored
+      // track — `.inSeconds.abs() >= kSignalLossSeconds` — not merely the same
+      // constant. Sharing a threshold but comparing it differently is how the two
+      // paths drifted apart in the first place.
+      final fixTime = fix.timestamp;
+      final previousFixTime = lastFixTimestamp;
+      final fixGapIsBlackout = previousFixTime != null &&
+          fixTime.difference(previousFixTime).inSeconds.abs() >=
+              kSignalLossSeconds;
+      lastFixTimestamp = fixTime;
+
+      // Either clock may call it. OR rather than replace: the wall clock still
+      // owns "the receiver has gone quiet" (it is the only one that ticks while
+      // *no* fixes arrive at all, which is what freezes the ride clock), and the
+      // fix clock adds the case it structurally cannot see — a gap that only
+      // exists between the timestamps, because the fixes were delivered in a
+      // burst. Widening can only ever re-anchor more often than before, never
+      // less, so the validated displaced-blackout behaviour is untouched: every
+      // gap that used to trip this still trips it.
+      final arrivalSaysBlackout =
+          clock.onFixAccepted(now, displacementSpeedKmh: displacementSpeedKmh);
+      if (arrivalSaysBlackout || fixGapIsBlackout) {
         dropSmoothingState();
+        // dropSmoothingState() clears the anchor, but this fix *is* the new one —
+        // re-seed so the next fix measures its gap from here rather than from
+        // nothing (which would silently skip a second consecutive blackout).
+        lastFixTimestamp = fixTime;
       }
 
       // Feed the Kalman filter. Fuse the Doppler velocity only when moving fast

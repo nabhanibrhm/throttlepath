@@ -8,7 +8,9 @@ Set-Location (Join-Path $PSScriptRoot "..")
 $OutDir = "D:\throttlepath-release"
 
 Write-Host "==> Building RELEASE APK..." -ForegroundColor Cyan
-flutter build apk --release
+# A release without the CARTO key would ship watermarked maps — refuse instead.
+if (-not (Test-Path "secrets.json")) { throw "secrets.json (CARTO_KEY) is missing." }
+flutter build apk --release --dart-define-from-file=secrets.json
 
 $src = "build\app\outputs\flutter-apk\app-release.apk"
 if (-not (Test-Path $src)) { throw "Build finished but $src is missing." }

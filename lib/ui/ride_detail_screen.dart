@@ -14,6 +14,7 @@ import '../data/models/ride.dart';
 import '../data/models/track_point.dart';
 import '../providers/history_providers.dart';
 import '../providers/settings_providers.dart';
+import '../services/geocode_backfill.dart';
 import '../theme/app_theme.dart';
 import 'chart_frame.dart';
 import 'detail_app_bar.dart';
@@ -146,6 +147,11 @@ class _RideDetailScreenState extends ConsumerState<RideDetailScreen> {
                   if ((trackAsync.valueOrNull?.discardedCount ?? 0) > 0)
                     _DiscardedNotice(
                         count: trackAsync.value!.discardedCount),
+                  if (trackAsync.hasValue)
+                    _DarkGpsNotice(
+                      ride: widget.ride,
+                      points: trackAsync.value!.points,
+                    ),
                   _SummaryPanel(ride: widget.ride, unit: unit),
                   // Charts from the recorded track (needs at least two points).
                   if ((trackAsync.valueOrNull?.points.length ?? 0) >= 2)
@@ -283,6 +289,156 @@ class _DiscardedNotice extends StatelessWidget {
   }
 }
 
+/// Says so when a ride was recording before the first fix arrived, or after the
+/// last one.
+///
+/// Distance covered in those windows was never captured and never can be — unlike
+/// a mid-ride blackout, there is no fix on the far side to even mark it. It shows
+/// up only as a ride that came out shorter than it felt, with nothing on the
+/// screen to explain why. On the ride this was found on, the bike had already
+/// moved 441 m by the time its first fix landed.
+///
+/// Reads the times only; nothing stored changes.
+class _DarkGpsNotice extends StatelessWidget {
+  const _DarkGpsNotice({required this.ride, required this.points});
+
+  final Ride ride;
+  final List<TrackPoint> points;
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = darkEnds(
+      points,
+      fixOf: trackPointFix,
+      startedAt: ride.startTime,
+      endedAt: ride.endTime,
+    );
+    final head = dark.head.inSeconds >= kDarkEndNoticeSeconds ? dark.head : null;
+    final tail = dark.tail.inSeconds >= kDarkEndNoticeSeconds ? dark.tail : null;
+    if (head == null && tail == null) return const SizedBox.shrink();
+
+    final parts = [
+      if (head != null) 'the first ${formatDuration(head.inSeconds)}',
+      if (tail != null) 'the last ${formatDuration(tail.inSeconds)}',
+    ];
+    final cx = AppColors.of(context);
+    return Container(
+      width: double.infinity,
+      color: cx.canvas,
+      padding: const EdgeInsets.fromLTRB(22, 16, 22, 0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.satellite_alt_outlined, size: 15, color: cx.textTertiary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'No GPS for ${parts.join(' and ')} of this recording. Any '
+              'distance covered then is not in the total.',
+              style: TextStyle(
+                color: cx.textTertiary,
+                fontSize: 12,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The "Origin → Destination" line, with a long-press to look it up again.
+///
+/// A reverse-geocode can come back wrong — the platform Geocoder answered a
+/// Sukabumi coordinate with a Bekasi name ~130 km away on a real ride — and until
+/// now the only repair was Settings' relabel, which re-queries *every* ride on
+/// the device. That burst is exactly what the Geocoder rate-limits, so the tool
+/// meant to fix one bad name was the one least able to. Two lookups can't trip
+/// it.
+///
+/// Long-press rather than tap: this is a repair, not navigation, and it spends
+/// network on a service that punishes repeat callers. No `Tooltip` — that also
+/// binds long-press, and the two would fight.
+class _PlaceLine extends ConsumerStatefulWidget {
+  const _PlaceLine({required this.ride});
+
+  final Ride ride;
+
+  @override
+  ConsumerState<_PlaceLine> createState() => _PlaceLineState();
+}
+
+class _PlaceLineState extends ConsumerState<_PlaceLine> {
+  bool _busy = false;
+
+  /// Says which of the four outcomes happened. "Reached nothing" must not read
+  /// like "found nothing to change" — conflating those is what let a silently
+  /// broken geocoder look like a healthy one.
+  static String _message(RelabelOutcome outcome) {
+    if (outcome.busy) return 'Already refreshing place names.';
+    if (outcome.failed > 0) {
+      return "Couldn't reach the geocoder — check your connection.";
+    }
+    return outcome.updated > 0
+        ? 'Place names refreshed.'
+        : 'Place names are already up to date.';
+  }
+
+  Future<void> _relabel() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    RelabelOutcome outcome = (updated: 0, failed: 0, busy: true);
+    try {
+      outcome = await GeocodeBackfill.instance.relabelRide(widget.ride.id);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+    if (!mounted) return;
+
+    if (outcome.updated > 0) {
+      // Re-read rather than guess: `relabelRide` decides what actually got
+      // written, and the pushed-in `Ride` is the object this screen draws from —
+      // the rename flow keeps it consistent the same way.
+      final fresh = await DatabaseService.instance.getRideById(widget.ride.id);
+      if (fresh != null) {
+        widget.ride
+          ..startPlace = fresh.startPlace
+          ..endPlace = fresh.endPlace;
+      }
+      ref.invalidate(rideHistoryProvider);
+      final tripId = widget.ride.tripId;
+      if (tripId != null) {
+        ref.invalidate(tripStintsProvider(tripId));
+        ref.invalidate(openTripsProvider);
+        ref.invalidate(finishedTripsProvider);
+      }
+      if (mounted) setState(() {});
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(_message(outcome))));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onLongPress: _relabel,
+      behavior: HitTestBehavior.opaque,
+      child: Opacity(
+        // The only "working" signal this line gets. A spinner beside a 13sp
+        // caption would be louder than the caption.
+        opacity: _busy ? 0.4 : 1,
+        child: PlaceRouteLabel(
+          startPlace: widget.ride.startPlace,
+          endPlace: widget.ride.endPlace,
+          fontSize: 13,
+        ),
+      ),
+    );
+  }
+}
+
 /// Bottom stats panel — distance, elapsed vs moving time, avg/max speed.
 class _SummaryPanel extends StatelessWidget {
   const _SummaryPanel({required this.ride, required this.unit});
@@ -305,11 +461,7 @@ class _SummaryPanel extends StatelessWidget {
           Text(_formatDate(ride.startTime), style: t.bodySmall),
           if (PlaceRouteLabel.label(ride.startPlace, ride.endPlace) != null) ...[
             const SizedBox(height: 5),
-            PlaceRouteLabel(
-              startPlace: ride.startPlace,
-              endPlace: ride.endPlace,
-              fontSize: 13,
-            ),
+            _PlaceLine(ride: ride),
           ],
           const SizedBox(height: 6),
           Row(

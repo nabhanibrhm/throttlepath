@@ -330,6 +330,44 @@ SegmentedTrack<T> segmentTrack<T>(
   );
 }
 
+/// Below this, a dark end is the receiver warming up or a thumb hovering over
+/// the stop button, and saying so would be noise on nearly every ride. The ones
+/// worth a word ran to minutes.
+const int kDarkEndNoticeSeconds = 60;
+
+/// Recording time at each end of a track during which no fix ever landed.
+///
+/// Not a gap *within* the track — [splitIntoRuns] owns those, and they are
+/// visible precisely because there is a fix on either side to bound them. These
+/// are the outer edges: from the rider pressing record to the first fix arriving,
+/// and from the last fix to the rider pressing stop. Nothing bounds them from
+/// outside, so no amount of segmenting reveals them; only the ride's own start
+/// and end times do.
+///
+/// They matter for the same reason a blackout does, and more permanently: any
+/// distance covered in them was never recorded and cannot be recovered. On a real
+/// ride the head ran 6m19s, and the bike had moved 441 m by the time the first fix
+/// arrived — a stretch no consumer of this track can ever account for.
+///
+/// Clamped at zero: a ride's stored end time can land a second or two *before*
+/// its final fix, and a negative "dark" period is not a thing to report.
+({Duration head, Duration tail}) darkEnds<T>(
+  List<T> points, {
+  required TrackFix Function(T) fixOf,
+  required DateTime startedAt,
+  DateTime? endedAt,
+}) {
+  if (points.isEmpty) return (head: Duration.zero, tail: Duration.zero);
+  final head = fixOf(points.first).time.difference(startedAt);
+  final tail = endedAt == null
+      ? Duration.zero
+      : endedAt.difference(fixOf(points.last).time);
+  return (
+    head: head.isNegative ? Duration.zero : head,
+    tail: tail.isNegative ? Duration.zero : tail,
+  );
+}
+
 /// Cumulative along-track distance (metres) for each fix in [points], frozen
 /// across gaps.
 ///
