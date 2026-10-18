@@ -49,8 +49,8 @@ CLAUDE.md
 # API keys (CARTO_KEY) — read by scripts/ via --dart-define-from-file
 /secrets.json
 
-#DB store
-/tool/pulled_db/*
+# Local diagnostics scripts + pulled ride DBs
+/tool/
 
 # Claude Code / graphify — local tooling, not part of the app
 /graphify-out/
